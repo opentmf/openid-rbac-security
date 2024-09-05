@@ -8,7 +8,7 @@
   </parent>
   <groupId>com.pia.commons</groupId>
   <artifactId>pia-security</artifactId>
-  <version>1.0.0</version>
+  <version>1.0.1-SNAPSHOT</version>
   <name>pia-security</name>
   <description>PiA RBAC Authentication and Authorization Library</description>
   <properties>
@@ -263,7 +263,7 @@
     <developerConnection>
       scm:git:git@github.com:pia-commons/pia-security.git
     </developerConnection>
-    <tag>pia-security-1.0.0</tag>
+    <tag>HEAD</tag>
   </scm>
 
 </project>
