@@ -1,0 +1,128 @@
+package com.pia.security.config;
+
+import static com.pia.security.config.CommonConfig.authoritiesClaimName;
+import static com.pia.security.config.CommonConfig.principalClaimName;
+import static com.pia.security.model.PiaSecurityConstants.SWAGGER;
+import static org.springframework.security.config.Customizer.withDefaults;
+import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
+import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher;
+
+import com.pia.security.jwt.JwtAutoConfiguration;
+import com.pia.security.model.PiaSecurityProperties;
+import java.util.Arrays;
+import lombok.RequiredArgsConstructor;
+import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigureAfter;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
+import org.springframework.boot.autoconfigure.web.reactive.function.client.WebClientAutoConfiguration;
+import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.annotation.Bean;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
+import org.springframework.security.config.annotation.web.configurers.CorsConfigurer;
+import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
+import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
+import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
+import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
+import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
+import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+
+/**
+ * PiA Web Security configures according to the supplied PiaSecurityProperties.
+ *
+ * @author Gokhan Demir
+ */
+@AutoConfiguration(after = JwtAutoConfiguration.class)
+@EnableWebSecurity
+@EnableMethodSecurity(securedEnabled = true, jsr250Enabled = true)
+@EnableConfigurationProperties(PiaSecurityProperties.class)
+@RequiredArgsConstructor
+@ConditionalOnWebApplication(type = Type.SERVLET)
+@AutoConfigureAfter(WebClientAutoConfiguration.class)
+public class PiaServletSecurityAutoConfiguration {
+
+  private final PiaSecurityProperties piaSecurityProperties;
+
+  @Bean
+  public SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) throws Exception {
+    return http
+        .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
+        .csrf(CsrfConfigurer::disable)
+        .formLogin(FormLoginConfigurer::disable)
+        .httpBasic(HttpBasicConfigurer::disable)
+        .logout(LogoutConfigurer::disable)
+        .headers(withDefaults())
+        .cors(CorsConfigurer::disable)
+        .authorizeHttpRequests(this::applyPiaSecurityDefinitions)
+        .oauth2ResourceServer(this::configureResourceServer)
+        .build();
+  }
+
+  private void applyPiaSecurityDefinitions(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    configureSwagger(requests);
+    configureWhitelist(requests);
+    configureAllowedEndpoints(requests);
+    configureSecureEndpoints(requests);
+    requests.anyRequest().denyAll();
+  }
+
+  private void configureWhitelist(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    requests
+        .requestMatchers(patternsToMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)))
+        .permitAll();
+  }
+
+  private void configureSwagger(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    requests.requestMatchers(patternsToMatchers(SWAGGER)).denyAll();
+  }
+
+  private void configureAllowedEndpoints(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    piaSecurityProperties.getAllowedEndpoints().forEach(matcher ->
+        requests
+            .requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+            .permitAll());
+  }
+
+  private void configureSecureEndpoints(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    piaSecurityProperties.getSecureEndpoints().forEach(matcher ->
+        requests
+            .requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+            .hasAnyAuthority(matcher.getRoles()));
+  }
+
+  private void configureResourceServer(
+      OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) {
+    oauth2.jwt(jwtConfigurer -> {
+      jwtConfigurer.jwkSetUri(piaSecurityProperties.getJwkSetUri());
+      jwtConfigurer.jwtAuthenticationConverter(jwtAuthenticationConverter());
+    });
+  }
+
+  private JwtAuthenticationConverter jwtAuthenticationConverter() {
+    var grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
+    grantedAuthoritiesConverter.setAuthorityPrefix("");
+    grantedAuthoritiesConverter.setAuthoritiesClaimName(
+        authoritiesClaimName(piaSecurityProperties.getAuthoritiesClaim()));
+    var jwtAuthenticationConverter = new JwtAuthenticationConverter();
+    jwtAuthenticationConverter.setPrincipalClaimName(principalClaimName(piaSecurityProperties.getUserClaim()));
+    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
+    return jwtAuthenticationConverter;
+  }
+
+  private static AntPathRequestMatcher[] patternsToMatchers(String[] patterns) {
+    return Arrays.stream(patterns)
+        .map(AntPathRequestMatcher::new)
+        .toArray(AntPathRequestMatcher[]::new);
+  }
+}

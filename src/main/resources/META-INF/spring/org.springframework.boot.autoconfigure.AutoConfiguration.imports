@@ -1,0 +1,3 @@
+com.pia.security.config.PiaReactiveSecurityAutoConfiguration
+com.pia.security.config.PiaServletSecurityAutoConfiguration
+com.pia.security.jwt.JwtAutoConfiguration
