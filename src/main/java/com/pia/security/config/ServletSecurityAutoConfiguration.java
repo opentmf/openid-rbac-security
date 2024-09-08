@@ -7,7 +7,6 @@ import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher;
 
-import com.pia.security.jwt.JwtAutoConfiguration;
 import com.pia.security.model.PiaSecurityProperties;
 import java.util.Arrays;
 import lombok.RequiredArgsConstructor;
@@ -28,6 +27,7 @@ import org.springframework.security.config.annotation.web.configurers.FormLoginC
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
@@ -38,16 +38,17 @@ import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
  *
  * @author Gokhan Demir
  */
-@AutoConfiguration(after = JwtAutoConfiguration.class)
+@AutoConfiguration(after = ServletJwtAutoConfiguration.class)
 @EnableWebSecurity
 @EnableMethodSecurity(securedEnabled = true, jsr250Enabled = true)
 @EnableConfigurationProperties(PiaSecurityProperties.class)
 @RequiredArgsConstructor
 @ConditionalOnWebApplication(type = Type.SERVLET)
 @AutoConfigureAfter(WebClientAutoConfiguration.class)
-public class PiaServletSecurityAutoConfiguration {
+public class ServletSecurityAutoConfiguration {
 
   private final PiaSecurityProperties piaSecurityProperties;
+  private final JwtDecoder jwtDecoder;
 
   @Bean
   public SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) throws Exception {
@@ -104,7 +105,7 @@ public class PiaServletSecurityAutoConfiguration {
   private void configureResourceServer(
       OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) {
     oauth2.jwt(jwtConfigurer -> {
-      jwtConfigurer.jwkSetUri(piaSecurityProperties.getJwkSetUri());
+      jwtConfigurer.decoder(jwtDecoder);
       jwtConfigurer.jwtAuthenticationConverter(jwtAuthenticationConverter());
     });
   }

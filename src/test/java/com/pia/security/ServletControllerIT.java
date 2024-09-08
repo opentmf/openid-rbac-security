@@ -7,6 +7,7 @@ import com.pia.security.jwt.JwtService;
 import com.pia.security.model.PiaSecurityProperties;
 import com.pia.security.service.TokenService;
 import dasniko.testcontainers.keycloak.KeycloakContainer;
+import java.io.IOException;
 import java.net.URI;
 import java.util.List;
 import lombok.extern.slf4j.Slf4j;
@@ -136,8 +137,12 @@ class ServletControllerIT {
   }
 
   private URI getTokenUri() {
-    String jwkSetUri = piaSecurityProperties.getJwkSetUri();
-    return URI.create(jwkSetUri.substring(0, jwkSetUri.lastIndexOf('/') + 1) + "token");
+    try {
+      var jwkSetUri = piaSecurityProperties.getJwkSetUri().getURL().toString();
+      return URI.create(jwkSetUri.substring(0, jwkSetUri.lastIndexOf('/') + 1) + "token");
+    } catch (IOException e) {
+      throw new IllegalArgumentException("jwk-set-uri is not a valid URL");
+    }
   }
 
   private static @NotNull MockHttpServletRequestBuilder postMercedesBuilder(String token) {

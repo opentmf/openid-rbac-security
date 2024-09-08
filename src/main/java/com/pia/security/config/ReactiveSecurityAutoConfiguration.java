@@ -5,7 +5,6 @@ import static com.pia.security.config.CommonConfig.principalClaimName;
 import static com.pia.security.model.PiaSecurityConstants.SWAGGER;
 import static org.springframework.security.config.Customizer.withDefaults;
 
-import com.pia.security.jwt.JwtAutoConfiguration;
 import com.pia.security.model.PiaSecurityProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -24,6 +23,7 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.FormLog
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
+import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
@@ -35,15 +35,16 @@ import org.springframework.security.web.server.savedrequest.NoOpServerRequestCac
  *
  * @author Gokhan Demir
  */
-@AutoConfiguration(after = JwtAutoConfiguration.class)
+@AutoConfiguration(after = ReactiveJwtAutoConfiguration.class)
 @EnableWebFluxSecurity
 @EnableReactiveMethodSecurity
 @EnableConfigurationProperties(PiaSecurityProperties.class)
 @RequiredArgsConstructor
 @ConditionalOnWebApplication(type = Type.REACTIVE)
-public class PiaReactiveSecurityAutoConfiguration {
+public class ReactiveSecurityAutoConfiguration {
 
   private final PiaSecurityProperties piaSecurityProperties;
+  private final ReactiveJwtDecoder reactiveJwtDecoder;
 
   @Bean
   public SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
@@ -63,7 +64,7 @@ public class PiaReactiveSecurityAutoConfiguration {
   private Customizer<OAuth2ResourceServerSpec> configureResourceServer() {
     return resourceServer ->
         resourceServer.jwt(jwt -> jwt
-            .jwkSetUri(piaSecurityProperties.getJwkSetUri())
+            .jwtDecoder(reactiveJwtDecoder)
             .jwtAuthenticationConverter(jwtAuthenticationConverter())
         );
   }

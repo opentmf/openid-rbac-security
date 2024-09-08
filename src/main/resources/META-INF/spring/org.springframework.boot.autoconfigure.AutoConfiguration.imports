@@ -1,3 +1,4 @@
-com.pia.security.config.PiaReactiveSecurityAutoConfiguration
-com.pia.security.config.PiaServletSecurityAutoConfiguration
-com.pia.security.jwt.JwtAutoConfiguration
+com.pia.security.config.ReactiveSecurityAutoConfiguration
+com.pia.security.config.ServletSecurityAutoConfiguration
+com.pia.security.config.ServletJwtAutoConfiguration
+com.pia.security.config.ReactiveJwtAutoConfiguration

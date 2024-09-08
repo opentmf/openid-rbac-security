@@ -85,4 +85,5 @@ pia-security:
 - 1.0.0
   - Initial revision
 - 1.0.1
-  - Started deploying source code on deploy
+  - Started including source code
+  - Started allowing local file for jwk-set-uri

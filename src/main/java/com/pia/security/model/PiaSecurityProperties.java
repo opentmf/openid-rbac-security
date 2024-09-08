@@ -8,6 +8,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
+import org.springframework.core.io.Resource;
 import org.springframework.validation.annotation.Validated;
 
 /**
@@ -37,9 +38,17 @@ public class PiaSecurityProperties {
   private List<@NotEmpty String> whitelist = new ArrayList<>();
 
   /**
-   * Must be a valid URL.
+   * Must be a valid Resource pointer.
+   * <p><strong>Examples:</strong></p>
+   * <ul>
+   * <li>classpath:local-jwk-set.json</li>
+   * <li>http://localhost:8092/realms/rehearsal-realm/protocol/openid-connect/certs</li>
+   * <li>file:///path/to/jwk-set.json</li>
+   * </ul>
+   * @see Resource
+   * @see Resource#getURL()
    */
-  private @NotNull String jwkSetUri;
+  private @NotNull Resource jwkSetUri;
 
   /**
    * The claim in the JWT to consider as the user's name. Defaults to "sub" if not specified.
