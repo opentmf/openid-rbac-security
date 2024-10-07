@@ -9,27 +9,28 @@ token:
       username: writer@pia-team.com
       password: writer
 
-pia-security:
-  user-claim: sub
-  authorities-claim: groups
-  secure-endpoints:
-    - method: POST
-      path: /car
-      roles:
-        - write
-    - method: GET
-      path: /car/*
-      roles:
-        - read
-        - write
-    - method: PUT
-      path: /car
-      roles:
-        - write
+pia:
+  security:
+    user-claim: sub
+    authorities-claim: groups
+    secure-endpoints:
+      - method: POST
+        path: /car
+        roles:
+          - write
+      - method: GET
+        path: /car/*
+        roles:
+          - read
+          - write
+      - method: PUT
+        path: /car
+        roles:
+          - write
 
-  allowed-endpoints:
-    - method: GET
-      path: /car
+    allowed-endpoints:
+      - method: GET
+        path: /car
 
-  whitelist:
-    - /whitelist/**
+    whitelist:
+      - /whitelist/**

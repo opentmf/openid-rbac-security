@@ -2,5 +2,6 @@ spring:
   main:
     web-application-type: servlet
 
-pia-security:
-  jwk-set-uri: http://localhost:8092/realms/rehearsal-realm/protocol/openid-connect/certs
+pia:
+  security:
+    jwk-set-uri: http://localhost:8092/realms/rehearsal-realm/protocol/openid-connect/certs

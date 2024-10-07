@@ -19,67 +19,68 @@ The following can be specified using configuration properties:
 Add this dependency:
 ```xml
 <project>
-  ...
-  <properties>
-    ...
-    <pia-security.version>1.0.1</pia-security.version>
-    ...
-  </properties>
+
+  <dependencyManagement>
+    <dependency>
+      <groupId>com.pia.commons</groupId>
+      <artifactId>pia-commons-versions</artifactId>
+      <version>RELEASE</version>
+      <type>pom</type>
+      <scope>import</scope>
+    </dependency>
+  </dependencyManagement>
 
   <dependencies>
-    ...
     <dependency>
       <groupId>com.pia.commons</groupId>
       <artifactId>pia-security</artifactId>
-      <version>${pia-security.version}</version>
     </dependency>
-    ...
   </dependencies>
-  ...
+
 </project>
 ```
 
 ### Sample Configuration
 ```yaml
 ---
-pia-security:
-  jwk-set-uri: https://keycloak:8000/realms/test/protocol/openid-connect/certs
-  user-claim: sub
-  authorities-claim: groups
-  secure-endpoints:
-    - method: POST
-      path: /order
-      roles:
-        - write
-        - ENTERPRISE-GUI/ADMIN_ALL
-        - ENTERPRISE-API/ADMIN_ALL
-    - method: GET
-      path: /engine-rest/process-definition/*/xml
-      roles:
-        - read
-        - ENTERPRISE-GUI/ADMIN_ALL
-        - ENTERPRISE-API/ADMIN_ALL
-    - method: PUT
-      path: /engine-rest/task/*
-      roles:
-        - write
-        - ENTERPRISE-GUI/ADMIN_ALL
-        - ENTERPRISE-API/ADMIN_ALL
-
-  allowed-endpoints:
-    - method: GET
-      path: /order/**
-    - method: PUT
-      path: /greetings
-
-  whitelist:
-    - /error
-    - /info
-    - /actuator
-    - /actuator/**
+pia:
+  security:
+    jwk-set-uri: https://keycloak:8000/realms/test/protocol/openid-connect/certs
+    user-claim: sub
+    authorities-claim: groups
+    secure-endpoints:
+      - method: POST
+        path: /order
+        roles:
+          - write
+          - ENTERPRISE-GUI/ADMIN_ALL
+          - ENTERPRISE-API/ADMIN_ALL
+      - method: GET
+        path: /engine-rest/process-definition/*/xml
+        roles:
+          - read
+          - ENTERPRISE-GUI/ADMIN_ALL
+          - ENTERPRISE-API/ADMIN_ALL
+      - method: PUT
+        path: /engine-rest/task/*
+        roles:
+          - write
+          - ENTERPRISE-GUI/ADMIN_ALL
+          - ENTERPRISE-API/ADMIN_ALL
+  
+    allowed-endpoints:
+      - method: GET
+        path: /order/**
+      - method: PUT
+        path: /greetings
+  
+    whitelist:
+      - /error
+      - /info
+      - /actuator
+      - /actuator/**
 
 ```
-
 
 ## Version History
 - 1.0.0
@@ -87,3 +88,5 @@ pia-security:
 - 1.0.1
   - Started including source code
   - Started allowing local file for jwk-set-uri
+- 1.0.2
+  - **Incompatible change**: Configuration prefix is now **pia.security**.

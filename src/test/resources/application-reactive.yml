@@ -2,5 +2,6 @@ spring:
   main:
     web-application-type: reactive
 
-pia-security:
-  jwk-set-uri: http://localhost:8091/realms/rehearsal-realm/protocol/openid-connect/certs
+pia:
+  security:
+    jwk-set-uri: http://localhost:8091/realms/rehearsal-realm/protocol/openid-connect/certs

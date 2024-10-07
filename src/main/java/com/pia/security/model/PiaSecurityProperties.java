@@ -18,7 +18,7 @@ import org.springframework.validation.annotation.Validated;
  */
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "pia-security")
+@ConfigurationProperties(prefix = "pia.security")
 @Validated
 public class PiaSecurityProperties {
 
