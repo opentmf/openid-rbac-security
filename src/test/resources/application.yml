@@ -34,3 +34,6 @@ pia:
 
     whitelist:
       - /whitelist/**
+
+    blacklist:
+      - /blacklist/**

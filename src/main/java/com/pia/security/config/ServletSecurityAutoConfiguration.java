@@ -2,7 +2,6 @@ package com.pia.security.config;
 
 import static com.pia.security.config.CommonConfig.authoritiesClaimName;
 import static com.pia.security.config.CommonConfig.principalClaimName;
-import static com.pia.security.model.PiaSecurityConstants.SWAGGER;
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher;
@@ -67,7 +66,7 @@ public class ServletSecurityAutoConfiguration {
 
   private void applyPiaSecurityDefinitions(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    configureSwagger(requests);
+    configureBlacklist(requests);
     configureWhitelist(requests);
     configureAllowedEndpoints(requests);
     configureSecureEndpoints(requests);
@@ -81,9 +80,9 @@ public class ServletSecurityAutoConfiguration {
         .permitAll();
   }
 
-  private void configureSwagger(
+  private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    requests.requestMatchers(patternsToMatchers(SWAGGER)).denyAll();
+    requests.requestMatchers(patternsToMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new))).denyAll();
   }
 
   private void configureAllowedEndpoints(

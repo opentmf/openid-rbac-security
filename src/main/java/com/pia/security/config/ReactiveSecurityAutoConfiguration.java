@@ -2,7 +2,6 @@ package com.pia.security.config;
 
 import static com.pia.security.config.CommonConfig.authoritiesClaimName;
 import static com.pia.security.config.CommonConfig.principalClaimName;
-import static com.pia.security.model.PiaSecurityConstants.SWAGGER;
 import static org.springframework.security.config.Customizer.withDefaults;
 
 import com.pia.security.model.PiaSecurityProperties;
@@ -87,7 +86,7 @@ public class ReactiveSecurityAutoConfiguration {
 
   private Customizer<AuthorizeExchangeSpec> applyPiaSecurityDefinitions() {
     return exchanges -> {
-      configureSwagger(exchanges);
+      configureBlacklist(exchanges);
       configureWhiteList(exchanges);
       configureAllowedEndpoints(exchanges);
       configureSecureEndpoints(exchanges);
@@ -105,8 +104,8 @@ public class ReactiveSecurityAutoConfiguration {
     exchanges.pathMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)).permitAll();
   }
 
-  private void configureSwagger(AuthorizeExchangeSpec exchanges) {
-    exchanges.pathMatchers(SWAGGER).denyAll();
+  private void configureBlacklist(AuthorizeExchangeSpec exchanges) {
+    exchanges.pathMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new)).denyAll();
   }
 
   private void configureSecureEndpoints(AuthorizeExchangeSpec exchanges) {

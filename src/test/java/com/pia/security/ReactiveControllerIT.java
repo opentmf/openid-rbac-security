@@ -108,6 +108,17 @@ class ReactiveControllerIT {
     get("/whitelist").expectStatus().isOk();
   }
 
+  @Test
+  void testGetBlacklist_withoutToken_returnsUnauthorized() {
+    get("/blacklist").expectStatus().isUnauthorized();
+  }
+
+  @Test
+  void testGetBlacklist_withReadToken_returnsForbidden() {
+    var token = reactiveTokenService.getToken(getTokenUri(), "read");
+    get("/blacklist", token).expectStatus().isForbidden();
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"read", "write"})
   void testPutCarAndThenGet_withBothTokens_returnsOk(String tokenType) {

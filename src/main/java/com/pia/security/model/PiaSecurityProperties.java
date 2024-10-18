@@ -33,6 +33,11 @@ public class PiaSecurityProperties {
   private List<@Valid Endpoint> allowedEndpoints = new ArrayList<>();
 
   /**
+   * The list of paths that will be denied access.
+   */
+  private List<@NotEmpty String> blacklist = new ArrayList<>();
+
+  /**
    * The list of paths that will bypass security.
    */
   private List<@NotEmpty String> whitelist = new ArrayList<>();

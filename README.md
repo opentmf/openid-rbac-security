@@ -80,6 +80,11 @@ pia:
       - /actuator
       - /actuator/**
 
+    blacklist:
+      - /swagger-ui.html
+      - /swagger-ui/**
+      - /swagger-resources/**
+      - /webjars/**
 ```
 
 ## Version History
@@ -90,3 +95,6 @@ pia:
   - Started allowing local file for jwk-set-uri
 - 1.0.2
   - **Incompatible change**: Configuration prefix is now **pia.security**.
+- 1.0.3
+  - Removed blocking hardcoded swagger endpoints
+  - Added new coniguration property `blacklist` that allows specifying endpoints to be blocked
