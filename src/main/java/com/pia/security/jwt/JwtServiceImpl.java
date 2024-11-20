@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.util.Collections;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.function.Function;
 import lombok.RequiredArgsConstructor;
@@ -80,11 +82,36 @@ public class JwtServiceImpl implements JwtService {
 
   @Override
   public List<SimpleGrantedAuthority> getGrantedAuthorities(String token, String claimName) {
-    return getClaim(token, jwt -> jwt.getClaimAsStringList(claimName))
+    return getClaim(token, jwt -> extractNestedClaimValuesAsList(jwt, claimName))
         .map(claims -> claims.stream()
             .map(SimpleGrantedAuthority::new)
             .toList())
         .orElseGet(Collections::emptyList);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static List<String> extractNestedClaimValuesAsList(Jwt jwt, String claimName) {
+    String[] claimParts = claimName.split("\\.");
+    if (claimParts.length == 1) {
+      return jwt.getClaimAsStringList(claimName);
+    }
+    Map<String, Object> claimMap = jwt.getClaim(claimParts[0]);
+    for (int i = 0, n = claimParts.length; i < n; i++) {
+      var result = claimMap.get(claimParts[i + 1]);
+      if (!(result instanceof Map)) {
+        break;
+      }
+      claimMap = (Map<String, Object>) result;
+    }
+    if (Objects.nonNull(claimMap)) {
+      Object claimValue = claimMap.get(claimParts[claimParts.length - 1]);
+      if (claimValue instanceof String s) {
+        return Collections.singletonList(s);
+      } else if (claimValue instanceof List<?> list) {
+        return (List<String>) list;
+      }
+    }
+    return Collections.emptyList();
   }
 
   @Override
