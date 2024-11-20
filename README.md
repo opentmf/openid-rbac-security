@@ -98,3 +98,5 @@ pia:
 - 1.0.3
   - Removed blocking hardcoded swagger endpoints
   - Added new coniguration property `blacklist` that allows specifying endpoints to be blocked
+- 1.0.4
+  - **Bugfix**: We now support deeper levels for pia.security.authorities-claim
