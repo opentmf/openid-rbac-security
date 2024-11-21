@@ -4,6 +4,7 @@ import static com.pia.security.config.CommonConfig.authoritiesClaimName;
 import static com.pia.security.config.CommonConfig.principalClaimName;
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import com.pia.security.jwt.GrantedAuthoritiesConverter;
 import com.pia.security.model.PiaSecurityProperties;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
@@ -23,7 +24,6 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBas
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
@@ -69,9 +69,7 @@ public class ReactiveSecurityAutoConfiguration {
   }
 
   private ReactiveJwtAuthenticationConverter jwtAuthenticationConverter() {
-    var grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
-    grantedAuthoritiesConverter.setAuthorityPrefix("");
-    grantedAuthoritiesConverter.setAuthoritiesClaimName(
+    var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
         authoritiesClaimName(piaSecurityProperties.getAuthoritiesClaim()));
 
     var grantedAuthoritiesConverterAdapter =

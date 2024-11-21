@@ -114,38 +114,47 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-deploy-plugin</artifactId>
-        <version>${maven-deploy-plugin.version}</version>
-        <configuration>
-          <skip>true</skip>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.sonatype.plugins</groupId>
-        <artifactId>nexus-staging-maven-plugin</artifactId>
-        <version>${nexus-staging-plugin.version}</version>
-        <executions>
-          <execution>
-            <id>default-deploy</id>
-            <phase>deploy</phase>
-            <goals>
-              <goal>deploy</goal>
-            </goals>
-          </execution>
-        </executions>
-        <configuration>
-          <serverId>pia-commons-release</serverId>
-          <nexusUrl>https://nexus.dnext-pia.com/</nexusUrl>
-          <skipStaging>true</skipStaging>
-        </configuration>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>${maven-compiler-plugin.version}</version>
         <configuration>
           <showDeprecation>true</showDeprecation>
         </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>${maven-jar-plugin.version}</version>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-javadoc-plugin</artifactId>
+        <version>${maven-javadoc-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>attach-javadocs</id>
+            <goals>
+              <goal>jar</goal>
+            </goals>
+            <configuration>
+              <failOnWarnings>false</failOnWarnings>
+              <failOnError>false</failOnError>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-source-plugin</artifactId>
+        <version>${maven-source-plugin.version}</version>
+        <executions>
+          <execution>
+            <id>attach-sources</id>
+            <phase>deploy</phase>
+            <goals>
+              <goal>jar-no-fork</goal>
+            </goals>
+          </execution>
+        </executions>
       </plugin>
       <plugin>
         <groupId>org.sonarsource.scanner.maven</groupId>
@@ -217,40 +226,30 @@
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-jar-plugin</artifactId>
-        <version>${maven-jar-plugin.version}</version>
+        <artifactId>maven-deploy-plugin</artifactId>
+        <version>${maven-deploy-plugin.version}</version>
+        <configuration>
+          <skip>true</skip>
+        </configuration>
       </plugin>
       <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-source-plugin</artifactId>
-        <version>${maven-source-plugin.version}</version>
+        <groupId>org.sonatype.plugins</groupId>
+        <artifactId>nexus-staging-maven-plugin</artifactId>
+        <version>${nexus-staging-plugin.version}</version>
         <executions>
           <execution>
-            <id>attach-sources</id>
+            <id>default-deploy</id>
             <phase>deploy</phase>
             <goals>
-              <goal>jar-no-fork</goal>
+              <goal>deploy</goal>
             </goals>
           </execution>
         </executions>
-      </plugin>
-      <plugin>
-        <groupId>org.apache.maven.plugins</groupId>
-        <artifactId>maven-javadoc-plugin</artifactId>
-        <version>${maven-javadoc-plugin.version}</version>
         <configuration>
-          <doclint>all,-missing</doclint>
-          <show>public</show>
-          <nohelp>true</nohelp>
+          <serverId>pia-commons-release</serverId>
+          <nexusUrl>https://nexus.dnext-pia.com/</nexusUrl>
+          <skipStaging>true</skipStaging>
         </configuration>
-        <executions>
-          <execution>
-            <id>attach-javadocs</id>
-            <goals>
-              <goal>jar</goal>
-            </goals>
-          </execution>
-        </executions>
       </plugin>
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>

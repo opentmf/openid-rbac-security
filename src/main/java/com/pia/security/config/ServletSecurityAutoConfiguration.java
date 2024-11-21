@@ -6,6 +6,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher;
 
+import com.pia.security.jwt.GrantedAuthoritiesConverter;
 import com.pia.security.model.PiaSecurityProperties;
 import java.util.Arrays;
 import lombok.RequiredArgsConstructor;
@@ -28,7 +29,6 @@ import org.springframework.security.config.annotation.web.configurers.LogoutConf
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.JwtGrantedAuthoritiesConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 
@@ -110,9 +110,7 @@ public class ServletSecurityAutoConfiguration {
   }
 
   private JwtAuthenticationConverter jwtAuthenticationConverter() {
-    var grantedAuthoritiesConverter = new JwtGrantedAuthoritiesConverter();
-    grantedAuthoritiesConverter.setAuthorityPrefix("");
-    grantedAuthoritiesConverter.setAuthoritiesClaimName(
+    var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
         authoritiesClaimName(piaSecurityProperties.getAuthoritiesClaim()));
     var jwtAuthenticationConverter = new JwtAuthenticationConverter();
     jwtAuthenticationConverter.setPrincipalClaimName(principalClaimName(piaSecurityProperties.getUserClaim()));

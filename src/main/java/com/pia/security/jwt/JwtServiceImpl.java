@@ -1,5 +1,6 @@
 package com.pia.security.jwt;
 
+import static com.pia.security.jwt.JwtUtil.extractNestedClaimValuesAsList;
 import static java.util.Optional.ofNullable;
 
 import com.nimbusds.jwt.JWTClaimsSet;
@@ -87,31 +88,6 @@ public class JwtServiceImpl implements JwtService {
             .map(SimpleGrantedAuthority::new)
             .toList())
         .orElseGet(Collections::emptyList);
-  }
-
-  @SuppressWarnings("unchecked")
-  private static List<String> extractNestedClaimValuesAsList(Jwt jwt, String claimName) {
-    String[] claimParts = claimName.split("\\.");
-    if (claimParts.length == 1) {
-      return jwt.getClaimAsStringList(claimName);
-    }
-    Map<String, Object> claimMap = jwt.getClaim(claimParts[0]);
-    for (int i = 0, n = claimParts.length; i < n; i++) {
-      var result = claimMap.get(claimParts[i + 1]);
-      if (!(result instanceof Map)) {
-        break;
-      }
-      claimMap = (Map<String, Object>) result;
-    }
-    if (Objects.nonNull(claimMap)) {
-      Object claimValue = claimMap.get(claimParts[claimParts.length - 1]);
-      if (claimValue instanceof String s) {
-        return Collections.singletonList(s);
-      } else if (claimValue instanceof List<?> list) {
-        return (List<String>) list;
-      }
-    }
-    return Collections.emptyList();
   }
 
   @Override
