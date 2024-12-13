@@ -20,7 +20,7 @@ import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import org.springframework.web.context.WebApplicationContext;
 
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
-@ActiveProfiles("servlet")
+@ActiveProfiles("servlet-local")
 @Slf4j
 @AutoConfigureMockMvc
 @TestInstance(Lifecycle.PER_CLASS)

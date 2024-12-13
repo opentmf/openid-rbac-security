@@ -31,6 +31,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
+import org.springframework.util.CollectionUtils;
 
 /**
  * PiA Web Security configures according to the supplied PiaSecurityProperties.
@@ -75,29 +76,33 @@ public class ServletSecurityAutoConfiguration {
 
   private void configureWhitelist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    requests
-        .requestMatchers(patternsToMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)))
-        .permitAll();
+    if (!CollectionUtils.isEmpty(piaSecurityProperties.getBlacklist())) {
+      requests.requestMatchers(
+          patternsToMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)))
+          .permitAll();
+    }
   }
 
   private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    requests.requestMatchers(patternsToMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new))).denyAll();
+    if (!CollectionUtils.isEmpty(piaSecurityProperties.getBlacklist())) {
+      requests.requestMatchers(
+          patternsToMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new)))
+          .denyAll();
+    }
   }
 
   private void configureAllowedEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     piaSecurityProperties.getAllowedEndpoints().forEach(matcher ->
-        requests
-            .requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+        requests.requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
             .permitAll());
   }
 
   private void configureSecureEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     piaSecurityProperties.getSecureEndpoints().forEach(matcher ->
-        requests
-            .requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+        requests.requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
             .hasAnyAuthority(matcher.getRoles()));
   }
 

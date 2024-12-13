@@ -102,3 +102,5 @@ pia:
   - **Bugfix**: We now support deeper levels for pia.security.authorities-claim
 - 1.0.5
   - **Bugfix**: Fix the support for handling deeper levels for pia.security.authorities-claim
+- 1.0.6
+  - **Improvement**: Both whitelist and blacklist have been made optional.

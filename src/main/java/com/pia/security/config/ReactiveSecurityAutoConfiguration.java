@@ -28,6 +28,7 @@ import org.springframework.security.oauth2.server.resource.authentication.Reacti
 import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
+import org.springframework.util.CollectionUtils;
 
 /**
  * Pia Reactive Security configures according to the supplied PiaSecurityProperties.
@@ -99,11 +100,17 @@ public class ReactiveSecurityAutoConfiguration {
   }
 
   private void configureWhiteList(AuthorizeExchangeSpec exchanges) {
-    exchanges.pathMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)).permitAll();
+    if (!CollectionUtils.isEmpty(piaSecurityProperties.getWhitelist())) {
+      exchanges.pathMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new))
+          .permitAll();
+    }
   }
 
   private void configureBlacklist(AuthorizeExchangeSpec exchanges) {
-    exchanges.pathMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new)).denyAll();
+    if (!CollectionUtils.isEmpty(piaSecurityProperties.getBlacklist())) {
+      exchanges.pathMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new))
+          .denyAll();
+    }
   }
 
   private void configureSecureEndpoints(AuthorizeExchangeSpec exchanges) {

@@ -5,3 +5,5 @@ spring:
 pia:
   security:
     jwk-set-uri: classpath:jwk-set.json
+    whitelist:
+    blacklist:
