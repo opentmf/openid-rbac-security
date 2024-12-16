@@ -76,7 +76,7 @@ public class ServletSecurityAutoConfiguration {
 
   private void configureWhitelist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    if (!CollectionUtils.isEmpty(piaSecurityProperties.getBlacklist())) {
+    if (!CollectionUtils.isEmpty(piaSecurityProperties.getWhitelist())) {
       requests.requestMatchers(
           patternsToMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)))
           .permitAll();

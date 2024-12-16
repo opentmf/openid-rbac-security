@@ -104,3 +104,5 @@ pia:
   - **Bugfix**: Fix the support for handling deeper levels for pia.security.authorities-claim
 - 1.0.6
   - **Improvement**: Both whitelist and blacklist have been made optional.
+- 1.0.7
+  - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
