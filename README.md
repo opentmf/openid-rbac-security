@@ -106,3 +106,5 @@ pia:
   - **Improvement**: Both whitelist and blacklist have been made optional.
 - 1.0.7
   - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
+- 1.0.8
+  - Fixed jwk-set-uri local file implementation for servlet-based security.

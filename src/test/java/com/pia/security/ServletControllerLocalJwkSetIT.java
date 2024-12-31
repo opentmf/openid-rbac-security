@@ -1,5 +1,6 @@
 package com.pia.security;
 
+import static com.pia.security.util.TokenUtil.EXPIRED_READER_TOKEN;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
 
 import com.pia.security.jwt.JwtService;
@@ -46,5 +47,10 @@ class ServletControllerLocalJwkSetIT {
     Assertions.assertNotNull(servletTokenService);
     Assertions.assertNotNull(piaSecurityProperties);
     Assertions.assertNotNull(jwtService);
+  }
+
+  @Test
+  void testJwtService_withValidToken_returnsValidResults() {
+    Assertions.assertTrue(jwtService.isExpiredToken(EXPIRED_READER_TOKEN));
   }
 }

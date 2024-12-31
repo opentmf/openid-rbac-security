@@ -9,6 +9,10 @@ token:
       username: writer@pia-team.com
       password: writer
 
+server:
+  servlet:
+    context-path: /pia/commons
+
 pia:
   security:
     user-claim: sub

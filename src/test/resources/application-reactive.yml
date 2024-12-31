@@ -4,4 +4,4 @@ spring:
 
 pia:
   security:
-    jwk-set-uri: http://localhost:8091/realms/rehearsal-realm/protocol/openid-connect/certs
+    jwk-set-uri: http://localhost:8191/realms/rehearsal-realm/protocol/openid-connect/certs

@@ -45,7 +45,7 @@ class ReactiveControllerIT {
     @SuppressWarnings("resource")
     KeycloakContainer keycloakContainer = new KeycloakContainer().withRealmImportFile(
         "realm/rehearsal-realm.json");
-    keycloakContainer.setPortBindings(List.of("8091:8080"));
+    keycloakContainer.setPortBindings(List.of("8191:8080"));
     keycloakContainer.start();
   }
 

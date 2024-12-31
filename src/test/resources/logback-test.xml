@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>%d{mm:ss.SSS} %-8level [%thread] %class{1} -- %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <logger name="com.pia" level="TRACE" />
+  <logger name="org.springframework" level="INFO" />
+  <logger name="org.springframework.security" level="TRACE" />
+  <logger name="reactor.netty" level="WARN" />
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE" />
+  </root>
+
+</configuration>

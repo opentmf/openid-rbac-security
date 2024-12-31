@@ -4,6 +4,6 @@ spring:
 
 pia:
   security:
-    jwk-set-uri: classpath:jwk-set.json
+    jwk-set-uri: classpath:jwk-set-rehearsal-realm.json
     whitelist:
     blacklist:

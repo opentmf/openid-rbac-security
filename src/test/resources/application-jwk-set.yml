@@ -1,0 +1,7 @@
+spring:
+  main:
+    web-application-type: servlet
+
+pia:
+  security:
+    jwk-set-uri: classpath:jwk-set.json

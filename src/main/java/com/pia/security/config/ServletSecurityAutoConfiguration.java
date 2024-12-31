@@ -4,11 +4,9 @@ import static com.pia.security.config.CommonConfig.authoritiesClaimName;
 import static com.pia.security.config.CommonConfig.principalClaimName;
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
-import static org.springframework.security.web.util.matcher.AntPathRequestMatcher.antMatcher;
 
 import com.pia.security.jwt.GrantedAuthoritiesConverter;
 import com.pia.security.model.PiaSecurityProperties;
-import java.util.Arrays;
 import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
@@ -30,7 +28,6 @@ import org.springframework.security.config.annotation.web.configurers.oauth2.ser
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.util.CollectionUtils;
 
 /**
@@ -77,32 +74,30 @@ public class ServletSecurityAutoConfiguration {
   private void configureWhitelist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     if (!CollectionUtils.isEmpty(piaSecurityProperties.getWhitelist())) {
-      requests.requestMatchers(
-          patternsToMatchers(piaSecurityProperties.getWhitelist().toArray(String[]::new)))
-          .permitAll();
+      piaSecurityProperties.getWhitelist()
+          .forEach(whiteListedEndpoint -> requests.requestMatchers(whiteListedEndpoint).permitAll());
     }
   }
 
   private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     if (!CollectionUtils.isEmpty(piaSecurityProperties.getBlacklist())) {
-      requests.requestMatchers(
-          patternsToMatchers(piaSecurityProperties.getBlacklist().toArray(String[]::new)))
-          .denyAll();
+      piaSecurityProperties.getBlacklist()
+          .forEach(blackListedEndpoint -> requests.requestMatchers(blackListedEndpoint).denyAll());
     }
   }
 
   private void configureAllowedEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     piaSecurityProperties.getAllowedEndpoints().forEach(matcher ->
-        requests.requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+        requests.requestMatchers(matcher.getMethod(), matcher.getPath())
             .permitAll());
   }
 
   private void configureSecureEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     piaSecurityProperties.getSecureEndpoints().forEach(matcher ->
-        requests.requestMatchers(antMatcher(matcher.getMethod(), matcher.getPath()))
+        requests.requestMatchers(matcher.getMethod(), matcher.getPath())
             .hasAnyAuthority(matcher.getRoles()));
   }
 
@@ -121,11 +116,5 @@ public class ServletSecurityAutoConfiguration {
     jwtAuthenticationConverter.setPrincipalClaimName(principalClaimName(piaSecurityProperties.getUserClaim()));
     jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
     return jwtAuthenticationConverter;
-  }
-
-  private static AntPathRequestMatcher[] patternsToMatchers(String[] patterns) {
-    return Arrays.stream(patterns)
-        .map(AntPathRequestMatcher::new)
-        .toArray(AntPathRequestMatcher[]::new);
   }
 }
