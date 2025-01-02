@@ -1,9 +1,0 @@
-spring:
-  main:
-    web-application-type: reactive
-
-pia:
-  security:
-    jwk-set-uri: classpath:jwk-set-rehearsal-realm.json
-    whitelist:
-    blacklist:

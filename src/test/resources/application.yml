@@ -31,6 +31,10 @@ pia:
         path: /car
         roles:
           - write
+      - method: DELETE
+        path: /car/*
+        roles:
+          - write
 
     allowed-endpoints:
       - method: GET

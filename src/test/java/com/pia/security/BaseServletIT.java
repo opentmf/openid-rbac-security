@@ -1,0 +1,214 @@
+package com.pia.security;
+
+import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+
+import com.pia.security.service.TokenService;
+import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Order;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
+import org.springframework.http.MediaType;
+import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders;
+import org.springframework.test.web.servlet.setup.MockMvcBuilders;
+import org.springframework.util.CollectionUtils;
+import org.springframework.web.context.WebApplicationContext;
+
+@AutoConfigureMockMvc
+abstract class BaseServletIT extends BaseIT {
+
+  @Autowired SecurityFilterChain servletSecurityFilterChain;
+  @Autowired TokenService servletTokenService;
+  @Autowired MockMvc mockMvc;
+  @Autowired WebApplicationContext context;
+
+  @BeforeAll
+  void beforeAll() {
+    mockMvc = MockMvcBuilders.webAppContextSetup(context)
+        .apply(springSecurity())
+        .build();
+  }
+
+  @Order(10)
+  @Test
+  void contextLoads() {
+    Assertions.assertNotNull(servletSecurityFilterChain);
+    Assertions.assertNotNull(servletTokenService);
+    Assertions.assertNotNull(piaSecurityProperties);
+    Assertions.assertNotNull(jwtService);
+  }
+
+  @Order(20)
+  @Test
+  void testPost_withValidToken_returnsCreated() throws Exception {
+    String token = getToken("write");
+    Assertions.assertNotNull(token);
+    mockMvc.perform(postMercedesBuilder(token)).andExpect(status().isCreated());
+  }
+
+  @Order(30)
+  @Test
+  void testPost_withoutNecessaryAuthorities_returnsForbidden() throws Exception {
+    String token = getToken("read");
+    Assertions.assertNotNull(token);
+    mockMvc.perform(postMercedesBuilder(token)).andExpect(status().isForbidden());
+  }
+
+  @Order(40)
+  @Test
+  void testPost_withoutToken_returnsUnauthorized() throws Exception {
+    mockMvc.perform(postMercedesBuilder()).andExpect(status().isUnauthorized());
+  }
+
+  @Order(50)
+  @Test
+  void testGetCars_withoutToken_returnsOk() throws Exception {
+    mockMvc.perform(getBuilder("/car")).andExpect(status().isOk());
+  }
+
+  @Order(60)
+  @Test
+  void testGetWhitelist_withoutToken_returnsValidResult() throws Exception {
+    if (CollectionUtils.isEmpty(piaSecurityProperties.getWhitelist())) {
+      mockMvc.perform(getBuilder("/whitelist")).andExpect(status().isUnauthorized());
+    } else {
+      mockMvc.perform(getBuilder("/whitelist")).andExpect(status().isOk());
+    }
+  }
+
+  @Order(70)
+  @Test
+  void testGetBlacklist_withoutToken_returnsUnauthorized() throws Exception {
+    mockMvc.perform(getBuilder("/blacklist")).andExpect(status().isUnauthorized());
+  }
+
+  @Order(80)
+  @Test
+  void testGetBlacklist_withReadToken_returnsForbidden() throws Exception {
+    String token = getToken("read");
+    mockMvc.perform(getBuilder(token, "/blacklist")).andExpect(status().isForbidden());
+  }
+
+  @Order(90)
+  @ParameterizedTest
+  @ValueSource(strings = {"read", "write"})
+  void testPutCarAndThenGet_withBothTokens_returnsOk(String tokenType) throws Exception {
+    String writeToken = getToken("write");
+    mockMvc.perform(putMercedesBuilder(writeToken)).andExpect(status().isOk());
+    String token = getToken(tokenType);
+    mockMvc.perform(getCarBuilder(token, "Mercedes")).andExpect(status().isOk());
+    mockMvc.perform(getCarBuilder(token, "nonexistent")).andExpect(status().isNotFound());
+  }
+
+  @Order(100)
+  @Test
+  void testProtectedResource_withoutToken_returnsUnauthorized() throws Exception {
+    mockMvc.perform(getBuilder("/car/model")).andExpect(status().isUnauthorized());
+  }
+
+  @Order(110)
+  @Test
+  void testProtectedButNotConfigured_withoutToken_returnsUnauthorized() throws Exception {
+    mockMvc.perform(getBuilder("/protectedButNotConfigured")).andExpect(status().isUnauthorized());
+  }
+
+  @Order(120)
+  @Test
+  void testProtectedButNotConfigured_withToken_returnsForbidden() throws Exception {
+    String token = getToken("write");
+    mockMvc.perform(getBuilder(token, "/protectedButNotConfigured")).andExpect(status().isForbidden());
+  }
+
+  @Order(130)
+  @Test
+  void testDeleteCar_withoutToken_returnsUnauthorized() throws Exception {
+    mockMvc.perform(deleteCarBuilder()).andExpect(status().isUnauthorized());
+  }
+
+  @Order(140)
+  @Test
+  void testDeleteCar_withInsufficientToken_returnsForbidden() throws Exception {
+    String token = getToken("read");
+    mockMvc.perform(deleteCarBuilder(token)).andExpect(status().isForbidden());
+  }
+
+  @Order(150)
+  @Test
+  void testDeleteCar_withToken_returnsNoContent() throws Exception {
+    String token = getToken("write");
+    mockMvc.perform(deleteCarBuilder(token)).andExpect(status().isNoContent());
+  }
+
+  @Order(160)
+  @Test
+  void testDeleteCar_withToken_returnsNotFound() throws Exception {
+    String token = getToken("write");
+    mockMvc.perform(deleteCarBuilder(token)).andExpect(status().isNotFound());
+  }
+
+  @Order(170)
+  @Test
+  void testJwtService_withValidToken_returnsValidResults() {
+    var token = getToken("write");
+    var jwt = jwtService.decodeJwt(token);
+    var groups = jwt.getClaim("groups");
+    Assertions.assertNotNull(groups);
+    Assertions.assertFalse(jwtService.isExpiredToken(jwt));
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder postMercedesBuilder(String token) {
+    return MockMvcRequestBuilders.post("/car")
+        .header("Authorization", "Bearer " + token)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(MERCEDES);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder postMercedesBuilder() {
+    return MockMvcRequestBuilders.post("/car")
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(MERCEDES);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder putMercedesBuilder(String token) {
+    return MockMvcRequestBuilders.put("/car")
+        .header("Authorization", "Bearer " + token)
+        .contentType(MediaType.APPLICATION_JSON)
+        .content(MERCEDES);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder getCarBuilder(String token, String model) {
+    return MockMvcRequestBuilders.get("/car/{model}", model)
+        .header("Authorization", "Bearer " + token)
+        .accept(MediaType.APPLICATION_JSON);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder getBuilder(String path) {
+    return MockMvcRequestBuilders.get(path)
+        .accept(MediaType.APPLICATION_JSON);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder getBuilder(String token, String path) {
+    return MockMvcRequestBuilders.get(path)
+        .header("Authorization", "Bearer " + token)
+        .accept(MediaType.APPLICATION_JSON);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder deleteCarBuilder() {
+    return MockMvcRequestBuilders.delete("/car/Mercedes")
+        .accept(MediaType.APPLICATION_JSON);
+  }
+
+  private static @NotNull MockHttpServletRequestBuilder deleteCarBuilder(String token) {
+    return MockMvcRequestBuilders.delete("/car/{model}", "Mercedes")
+        .header("Authorization", "Bearer " + token)
+        .accept(MediaType.APPLICATION_JSON);
+  }
+}

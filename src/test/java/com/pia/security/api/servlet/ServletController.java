@@ -12,6 +12,7 @@ import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -65,6 +66,17 @@ public class ServletController {
   @ResponseStatus(HttpStatus.OK)
   public @ResponseBody Collection<Car> getAllCars() {
     return CARS.values();
+  }
+
+  @DeleteMapping(path = "/car/{name}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public void deleteCarByName(
+      @PathVariable String name,
+      @RequestHeader(value = "Authorization") String authorization) {
+    if (!CARS.containsKey(name)) {
+      throw new CarNotFoundException(name);
+    }
+    CARS.remove(name);
   }
 
   @GetMapping(path = "/whitelist", produces = APPLICATION_JSON_VALUE)

@@ -11,6 +11,7 @@ import java.util.Map;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -29,6 +30,7 @@ import reactor.core.publisher.Mono;
 @RestController
 @ConditionalOnWebApplication(type = Type.REACTIVE)
 public class ReactiveController {
+
   private static final Map<String, Car> CARS = new LinkedHashMap<>();
 
   @PostMapping(path = "/car", consumes = APPLICATION_JSON_VALUE)
@@ -67,6 +69,18 @@ public class ReactiveController {
   @ResponseStatus(HttpStatus.OK)
   public @ResponseBody Flux<Car> getAllCars() {
     return Flux.fromIterable(CARS.values());
+  }
+
+  @DeleteMapping(path = "/car/{name}")
+  @ResponseStatus(HttpStatus.NO_CONTENT)
+  public Mono<Void> deleteCar(
+      @PathVariable String name,
+      @RequestHeader(value = "Authorization") String authorization) {
+    if (!CARS.containsKey(name)) {
+      return Mono.error(new CarNotFoundException(name));
+    }
+    CARS.remove(name);
+    return Mono.empty();
   }
 
   @GetMapping(path = "/whitelist", produces = APPLICATION_JSON_VALUE)

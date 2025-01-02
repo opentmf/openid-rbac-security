@@ -1,0 +1,25 @@
+package com.pia.security.util;
+
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+
+/**
+ * @author Gokhan Demir
+ */
+abstract class BaseResourceRetriever {
+
+  static String contents(InputStream inputStream) {
+    try {
+      var result = new ByteArrayOutputStream();
+      var buffer = new byte[1024];
+      for (int length; (length = inputStream.read(buffer)) != -1; ) {
+        result.write(buffer, 0, length);
+      }
+      return result.toString(StandardCharsets.UTF_8);
+    } catch (IOException e) {
+      throw new IllegalArgumentException(e);
+    }
+  }
+}

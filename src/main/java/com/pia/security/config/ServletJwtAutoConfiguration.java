@@ -16,6 +16,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.annotation.Bean;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
+import org.springframework.util.ResourceUtils;
 
 /**
  * Configure and expose the jwtDecoder bean for use by the JwtService and
@@ -31,7 +32,17 @@ public class ServletJwtAutoConfiguration {
   private final PiaSecurityProperties piaSecurityProperties;
 
   @Bean
-  public JwtDecoder jwtDecoder() {
+  public JwtDecoder jwtDecoder() throws IOException {
+    var local = ResourceUtils.isFileURL(piaSecurityProperties.getJwkSetUri().getURL());
+    return local ? customJwtDecoder() : defaultJwtDecoder();
+  }
+
+  private JwtDecoder defaultJwtDecoder() throws IOException {
+    var jwkSetUri = piaSecurityProperties.getJwkSetUri();
+    return NimbusJwtDecoder.withJwkSetUri(jwkSetUri.getURL().toString()).build();
+  }
+
+  private JwtDecoder customJwtDecoder() {
     try {
       URL url = piaSecurityProperties.getJwkSetUri().getURL();
       JWKSource<SecurityContext> source = JWKSourceBuilder

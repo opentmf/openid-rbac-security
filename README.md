@@ -107,4 +107,4 @@ pia:
 - 1.0.7
   - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
 - 1.0.8
-  - Fixed jwk-set-uri local file implementation for servlet-based security.
+  - **Bugfix**: Fixed jwk-set-uri local file retrievals for enabling easier IT tests.
