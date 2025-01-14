@@ -56,7 +56,7 @@ public class ServletSecurityAutoConfiguration {
         .httpBasic(HttpBasicConfigurer::disable)
         .logout(LogoutConfigurer::disable)
         .headers(withDefaults())
-        .cors(CorsConfigurer::disable)
+        .cors(withDefaults())
         .authorizeHttpRequests(this::applyPiaSecurityDefinitions)
         .oauth2ResourceServer(this::configureResourceServer)
         .build();
