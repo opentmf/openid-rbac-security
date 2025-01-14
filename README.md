@@ -108,3 +108,5 @@ pia:
   - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
 - 1.0.8
   - **Bugfix**: Fixed jwk-set-uri local file retrievals for enabling easier IT tests.
+- 1.0.9
+  - **Bugfix**: Fixed cors headers configuration to obey the application configuration.

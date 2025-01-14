@@ -17,7 +17,6 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity.AuthorizeExchangeSpec;
-import org.springframework.security.config.web.server.ServerHttpSecurity.CorsSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.CsrfSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.FormLoginSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
@@ -55,7 +54,7 @@ public class ReactiveSecurityAutoConfiguration {
         .httpBasic(HttpBasicSpec::disable)
         .logout(LogoutSpec::disable)
         .headers(withDefaults())
-        .cors(CorsSpec::disable)
+        .cors(withDefaults())
         .authorizeExchange(applyPiaSecurityDefinitions())
         .oauth2ResourceServer(configureResourceServer())
         .build();
