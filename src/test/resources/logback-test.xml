@@ -7,7 +7,7 @@
     </encoder>
   </appender>
 
-  <logger name="com.pia" level="TRACE" />
+  <logger name="org.opentmf" level="TRACE" />
   <logger name="org.springframework" level="INFO" />
   <logger name="org.springframework.security" level="TRACE" />
   <logger name="reactor.netty" level="WARN" />

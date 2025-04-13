@@ -1,5 +1,5 @@
-# pia-security
-Role based Access Control (RBAC) Security Library
+# openid-rbac-security
+OpenID, Role Based Access Control (RBAC) Security Library
 
 ## Description
 This autoconfiguration library uses Spring Boot Security and Spring Boot oauth2 resource server for enabling Bearer Token authentication.
@@ -11,7 +11,7 @@ The following can be specified using configuration properties:
 - The allowed endpoints can be specified together with the HTTP method.
 - The whitelisted endpoints can be specified or all HTTP methods.
 
-**Important:** Protected but not configured endpoints will cause HTTP 403, Forbidden. If you don't want this to happen, define all protected endpoints in the pia-security.
+**Important:** Protected but not configured endpoints will cause HTTP 403, Forbidden. If you don't want this to happen, define all protected endpoints in the openid-rbac-security.
 
 ## Usage
 
@@ -21,19 +21,21 @@ Add this dependency:
 <project>
 
   <dependencyManagement>
-    <dependency>
-      <groupId>com.pia.commons</groupId>
-      <artifactId>pia-commons-versions</artifactId>
-      <version>RELEASE</version>
-      <type>pom</type>
-      <scope>import</scope>
-    </dependency>
+    <dependencies>
+      <dependency>
+        <groupId>org.opentmf</groupId>
+        <artifactId>opentmf-versions</artifactId>
+        <type>pom</type>
+        <scope>import</scope>
+        <version>RELEASE</version>
+      </dependency>
+    </dependencies>
   </dependencyManagement>
 
   <dependencies>
     <dependency>
-      <groupId>com.pia.commons</groupId>
-      <artifactId>pia-security</artifactId>
+      <groupId>org.opentmf.security</groupId>
+      <artifactId>openid-rbac-security</artifactId>
     </dependency>
   </dependencies>
 
@@ -43,7 +45,7 @@ Add this dependency:
 ### Sample Configuration
 ```yaml
 ---
-pia:
+opentmf:
   security:
     jwk-set-uri: https://keycloak:8000/realms/test/protocol/openid-connect/certs
     user-claim: sub
@@ -88,25 +90,27 @@ pia:
 ```
 
 ## Version History
-- 1.0.0
+### 1.0.0
   - Initial revision
-- 1.0.1
+### 1.0.1
   - Started including source code
   - Started allowing local file for jwk-set-uri
-- 1.0.2
+### 1.0.2
   - **Incompatible change**: Configuration prefix is now **pia.security**.
-- 1.0.3
+### 1.0.3
   - Removed blocking hardcoded swagger endpoints
-  - Added new coniguration property `blacklist` that allows specifying endpoints to be blocked
-- 1.0.4
+  - Added new configuration property `blacklist` that allows specifying endpoints to be blocked
+### 1.0.4
   - **Bugfix**: We now support deeper levels for pia.security.authorities-claim
-- 1.0.5
+### 1.0.5
   - **Bugfix**: Fix the support for handling deeper levels for pia.security.authorities-claim
-- 1.0.6
+### 1.0.6
   - **Improvement**: Both whitelist and blacklist have been made optional.
-- 1.0.7
+### 1.0.7
   - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
-- 1.0.8
+### 1.0.8
   - **Bugfix**: Fixed jwk-set-uri local file retrievals for enabling easier IT tests.
-- 1.0.9
+### 1.0.9
   - **Bugfix**: Fixed cors headers configuration to obey the application configuration.
+### 1.1.0
+- Initial Open Source Release, replacing pia with opentmf

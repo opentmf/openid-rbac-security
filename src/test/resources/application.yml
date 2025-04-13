@@ -11,9 +11,9 @@ token:
 
 server:
   servlet:
-    context-path: /pia/commons
+    context-path: /opentmf/commons
 
-pia:
+opentmf:
   security:
     user-claim: sub
     authorities-claim: groups

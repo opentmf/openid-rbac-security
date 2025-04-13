@@ -1,4 +1,4 @@
-pia:
+opentmf:
   security:
     jwk-set-uri: classpath:jwk-set.json
     whitelist:
