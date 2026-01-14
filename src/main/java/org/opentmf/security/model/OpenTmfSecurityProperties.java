@@ -61,6 +61,19 @@ public class OpenTmfSecurityProperties {
   private String userClaim;
 
   /**
+   * Fallback claims to use when the primary user-claim is not present in the JWT token.
+   * This is useful for client_credentials grant type where the primary claim (e.g., "email")
+   * may not exist. The claims will be tried in order until one is found.
+   * <p><strong>Example:</strong></p>
+   * <pre>
+   * opentmf.security:
+   *   user-claim: email
+   *   fallback-user-claims: client_id, azp, appid, sub
+   * </pre>
+   */
+  private List<String> fallbackUserClaims = new ArrayList<>();
+
+  /**
    * The claim in the JWT to consider as the role associations. Defaults to "roles" if now
    * specified.
    */

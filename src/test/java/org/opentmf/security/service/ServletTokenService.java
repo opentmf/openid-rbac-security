@@ -1,10 +1,10 @@
 package org.opentmf.security.service;
 
+import java.net.URI;
+import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.Token;
 import org.opentmf.security.model.TokenProperties;
 import org.opentmf.security.model.TokenProperties.UserPass;
-import java.net.URI;
-import lombok.RequiredArgsConstructor;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.http.HttpEntity;
 import org.springframework.http.HttpHeaders;
@@ -44,6 +44,26 @@ public class ServletTokenService implements TokenService {
 
   @Override
   public Mono<String> getReactiveToken(URI uri, String token) {
+    throw new UnsupportedOperationException("I am not reactive.");
+  }
+
+  @Override
+  public String getToken(URI uri) {
+    RestTemplate restTemplate = new RestTemplate();
+    HttpHeaders headers = new HttpHeaders();
+    headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
+    headers.setBasicAuth(tokenProperties.getClientId(), tokenProperties.getClientSecret());
+    MultiValueMap<String, String> body = new LinkedMultiValueMap<>();
+    body.add("grant_type", "client_credentials");
+    body.add("scope", "openid");
+    HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(body, headers);
+    ResponseEntity<Token> response = restTemplate.postForEntity(uri, request, Token.class);
+    Assert.notNull(response.getBody(), "Response body is null");
+    return response.getBody().getAccessToken();
+  }
+
+  @Override
+  public Mono<String> getReactiveToken(URI uri) {
     throw new UnsupportedOperationException("I am not reactive.");
   }
 }

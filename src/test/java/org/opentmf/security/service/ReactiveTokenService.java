@@ -1,9 +1,9 @@
 package org.opentmf.security.service;
 
-import org.opentmf.security.model.Token;
-import org.opentmf.security.model.TokenProperties;
 import java.net.URI;
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.model.Token;
+import org.opentmf.security.model.TokenProperties;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.http.MediaType;
@@ -36,6 +36,21 @@ public class ReactiveTokenService implements TokenService {
   @Override
   public String getToken(URI uri, String user) {
     return getReactiveToken(uri, user).block();
+  }
+
+  @Override
+  public Mono<String> getReactiveToken(URI uri) {
+    var tokenRequestForm = BodyInserters
+        .fromFormData("grant_type", "client_credentials")
+        .with("scope", "openid");
+
+    return postToken(uri, tokenRequestForm)
+        .map(Token::getAccessToken);
+  }
+
+  @Override
+  public String getToken(URI uri) {
+    return getReactiveToken(uri).block();
   }
 
   private Mono<Token> postToken(URI url,

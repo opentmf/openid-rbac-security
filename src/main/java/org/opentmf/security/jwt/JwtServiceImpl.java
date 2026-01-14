@@ -1,7 +1,7 @@
 package org.opentmf.security.jwt;
 
-import static org.opentmf.security.jwt.JwtUtil.extractNestedClaimValuesAsList;
 import static java.util.Optional.ofNullable;
+import static org.opentmf.security.jwt.JwtUtil.extractNestedClaimValuesAsList;
 
 import com.nimbusds.jwt.JWTClaimsSet;
 import com.nimbusds.jwt.JWTParser;
@@ -101,7 +101,7 @@ public class JwtServiceImpl implements JwtService {
     Assert.hasText(claimName, CLAIM_KEY_VALIDATION_MESSAGE);
     Assert.hasText(token, TOKEN_VALIDATION_MESSAGE);
     JWTClaimsSet claimsSet = parseJwt(token);
-    log.debug("Retrieving claim: {} from token", claimName);
+    log.trace("Retrieving claim: {} from token", claimName);
     @SuppressWarnings("unchecked")
     T claim = (T) claimsSet.getClaim(claimName);
     return ofNullable(claim);
@@ -112,7 +112,7 @@ public class JwtServiceImpl implements JwtService {
       var parsedJwt = JWTParser.parse(token);
       return parsedJwt.getJWTClaimsSet();
     } catch (ParseException e) {
-      log.error("Failed to parse token: {}", e.getMessage());
+      log.warn("Failed to parse token");
       throw new InvalidBearerTokenException("Failed to parse token", e);
     }
   }

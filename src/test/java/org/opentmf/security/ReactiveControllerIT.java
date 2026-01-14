@@ -1,16 +1,14 @@
 package org.opentmf.security;
 
-import static org.opentmf.security.util.TokenUtil.DIFFERENT_PROVIDER_TOKEN;
-import static org.opentmf.security.util.TokenUtil.EXPIRED_READER_TOKEN;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.opentmf.security.util.TokenUtil.DIFFERENT_PROVIDER_TOKEN;
+import static org.opentmf.security.util.TokenUtil.EXPIRED_READER_TOKEN;
 
 import dasniko.testcontainers.keycloak.KeycloakContainer;
-import java.io.IOException;
-import java.net.URI;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
@@ -24,7 +22,7 @@ class ReactiveControllerIT extends BaseReactiveIT{
   static {
     @SuppressWarnings("resource")
     KeycloakContainer keycloakContainer = new KeycloakContainer().withRealmImportFile(
-        "realm/rehearsal-realm.json");
+            "realm/rehearsal.json");
     keycloakContainer.setPortBindings(List.of("8191:8080"));
     keycloakContainer.start();
   }
@@ -65,14 +63,5 @@ class ReactiveControllerIT extends BaseReactiveIT{
   @Override
   String getToken(String scope) {
     return reactiveTokenService.getToken(getTokenUri(), scope);
-  }
-
-  private URI getTokenUri() {
-    try {
-      var jwkSetUri = openTmfSecurityProperties.getJwkSetUri().getURL().toString();
-      return URI.create(jwkSetUri.substring(0, jwkSetUri.lastIndexOf('/') + 1) + "token");
-    } catch (IOException e) {
-      throw new IllegalArgumentException("jwk-set-uri is not a valid URL");
-    }
   }
 }

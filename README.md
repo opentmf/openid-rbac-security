@@ -48,7 +48,8 @@ Add this dependency:
 opentmf:
   security:
     jwk-set-uri: https://keycloak:8000/realms/test/protocol/openid-connect/certs
-    user-claim: sub
+    user-claim: email
+    fallback-user-claims: client_id, azp, appid, sub
     authorities-claim: groups
     secure-endpoints:
       - method: POST
@@ -89,6 +90,47 @@ opentmf:
       - /webjars/**
 ```
 
+### Configuration Properties
+
+#### `user-claim`
+The JWT claim name to use as the principal (user identifier). Defaults to `sub` if not specified.
+
+**Example:** `user-claim: email`
+
+#### `fallback-user-claims`
+A list of fallback claim names to use when the primary `user-claim` is not present in the JWT token. This is particularly useful when using `client_credentials` grant type, where user-specific claims (like `email`) may not be present.
+
+The fallback claims are tried in order until one is found. If none of the fallback claims are found, the JWT `sub` (subject) claim is used as a final fallback.
+
+**Supports nested claims** using dot notation (e.g., `user.email`, `client_info.client_id`, `realm_access.client_id`).
+
+**Example:** `fallback-user-claims: client_id, azp, appid, user.email, sub`
+
+**Use Case:** When your application needs to support both:
+- **Password grant tokens** (user authentication) - contains `email` claim
+- **Client credentials tokens** (service-to-service) - contains `client_id`, `azp`, or `appid` but not `email`
+
+**Configuration Example:**
+```yaml
+opentmf:
+  security:
+    user-claim: email              # Primary claim for user tokens
+    fallback-user-claims:          # Fallback claims for service tokens
+      - client_id                   # Simple claim
+      - azp                         # Simple claim
+      - appid                       # Simple claim
+      - user.email                  # Nested claim (if user object contains email)
+      - client_info.client_id       # Nested claim (if client_info object contains client_id)
+      - sub                         # Final fallback (always present in valid JWTs)
+```
+
+#### `authorities-claim`
+The JWT claim name that contains the user roles/authorities. Defaults to `roles` if not specified.
+
+**Example:** `authorities-claim: groups`
+
+Supports nested claims using dot notation (e.g., `realm_access.roles`).
+
 ## Version History
 ### 1.0.0
   - Initial revision
@@ -114,3 +156,6 @@ opentmf:
   - **Bugfix**: Fixed cors headers configuration to obey the application configuration.
 ### 1.1.0
 - Initial Open Source Release, replacing pia with opentmf
+
+### 1.1.1
+- **New Feature**: Added `fallback-user-claims` configuration property to support fallback claim extraction when the primary `user-claim` is not present in the JWT token. This enables support for both password grant tokens (with user claims like `email`) and client_credentials grant tokens (with service claims like `client_id`, `azp`, `appid`). The fallback mechanism tries claims in order and falls back to JWT `sub` if none are found.

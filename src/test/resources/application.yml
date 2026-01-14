@@ -15,7 +15,8 @@ server:
 
 opentmf:
   security:
-    user-claim: sub
+    user-claim: email
+    fallback-user-claims: client_id, azp, appid, sub
     authorities-claim: groups
     secure-endpoints:
       - method: POST

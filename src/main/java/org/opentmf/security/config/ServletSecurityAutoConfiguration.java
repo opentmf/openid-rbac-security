@@ -5,9 +5,11 @@ import static org.opentmf.security.config.CommonConfig.principalClaimName;
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
-import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
-import org.opentmf.security.model.OpenTmfSecurityProperties;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
+import org.opentmf.security.jwt.ServletJwtPrincipalConverter;
+import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -15,6 +17,8 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.autoconfigure.web.reactive.function.client.WebClientAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -24,8 +28,8 @@ import org.springframework.security.config.annotation.web.configurers.FormLoginC
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.util.CollectionUtils;
 
@@ -108,12 +112,18 @@ public class ServletSecurityAutoConfiguration {
     });
   }
 
-  private JwtAuthenticationConverter jwtAuthenticationConverter() {
+  private Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter() {
     var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
         authoritiesClaimName(openTmfSecurityProperties.getAuthoritiesClaim()));
-    var jwtAuthenticationConverter = new JwtAuthenticationConverter();
-    jwtAuthenticationConverter.setPrincipalClaimName(principalClaimName(openTmfSecurityProperties.getUserClaim()));
-    jwtAuthenticationConverter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverter);
-    return jwtAuthenticationConverter;
+    
+    String primaryClaim = principalClaimName(openTmfSecurityProperties.getUserClaim());
+    List<String> fallbackClaims = openTmfSecurityProperties.getFallbackUserClaims();
+    
+    // Always use ServletJwtPrincipalConverter which supports fallback to 'sub' claim
+    return new ServletJwtPrincipalConverter(
+        primaryClaim,
+        fallbackClaims != null ? fallbackClaims : List.of(),
+        grantedAuthoritiesConverter
+    );
   }
 }

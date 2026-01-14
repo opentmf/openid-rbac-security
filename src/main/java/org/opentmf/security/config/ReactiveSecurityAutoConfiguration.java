@@ -4,14 +4,18 @@ import static org.opentmf.security.config.CommonConfig.authoritiesClaimName;
 import static org.opentmf.security.config.CommonConfig.principalClaimName;
 import static org.springframework.security.config.Customizer.withDefaults;
 
-import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
-import org.opentmf.security.model.OpenTmfSecurityProperties;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
+import org.opentmf.security.jwt.ReactiveJwtPrincipalConverter;
+import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.core.convert.converter.Converter;
+import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
@@ -22,12 +26,12 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.FormLog
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
+import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtAuthenticationConverter;
-import org.springframework.security.oauth2.server.resource.authentication.ReactiveJwtGrantedAuthoritiesConverterAdapter;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.util.CollectionUtils;
+import reactor.core.publisher.Mono;
 
 /**
  * OpenTMF Reactive Security configures according to the supplied OpenTmfSecurityProperties.
@@ -68,18 +72,19 @@ public class ReactiveSecurityAutoConfiguration {
         );
   }
 
-  private ReactiveJwtAuthenticationConverter jwtAuthenticationConverter() {
+  private Converter<Jwt, Mono<? extends AbstractAuthenticationToken>> jwtAuthenticationConverter() {
     var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
         authoritiesClaimName(openTmfSecurityProperties.getAuthoritiesClaim()));
 
-    var grantedAuthoritiesConverterAdapter =
-        new ReactiveJwtGrantedAuthoritiesConverterAdapter(grantedAuthoritiesConverter);
-
-    var converter = new ReactiveJwtAuthenticationConverter();
-    converter.setPrincipalClaimName(principalClaimName(openTmfSecurityProperties.getUserClaim()));
-    converter.setJwtGrantedAuthoritiesConverter(grantedAuthoritiesConverterAdapter);
-
-    return converter;
+    String primaryClaim = principalClaimName(openTmfSecurityProperties.getUserClaim());
+    List<String> fallbackClaims = openTmfSecurityProperties.getFallbackUserClaims();
+    
+    // Always use ReactiveJwtPrincipalConverter which supports fallback to 'sub' claim
+    return new ReactiveJwtPrincipalConverter(
+        primaryClaim,
+        fallbackClaims != null ? fallbackClaims : List.of(),
+        grantedAuthoritiesConverter
+    );
   }
 
   private Customizer<AuthorizeExchangeSpec> applyOpenTmfSecurityDefinitions() {
