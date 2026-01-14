@@ -8,7 +8,7 @@
   </parent>
   <groupId>org.opentmf.security</groupId>
   <artifactId>openid-rbac-security</artifactId>
-  <version>1.1.1-SNAPSHOT</version>
+  <version>1.1.1</version>
   <name>openid-rbac-security</name>
 
   <description>
@@ -343,7 +343,7 @@
     <url>https://github.com/opentmf/openid-rbac-security</url>
     <connection>scm:git:https://github.com/opentmf/openid-rbac-security.git</connection>
     <developerConnection>scm:git:git@github.com:opentmf/openid-rbac-security.git</developerConnection>
-    <tag>HEAD</tag>
+    <tag>openid-rbac-security-1.1.1</tag>
   </scm>
 
 </project>
