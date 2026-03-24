@@ -32,7 +32,7 @@ public class ServletJwtAutoConfiguration {
   private final OpenTmfSecurityProperties openTmfSecurityProperties;
 
   @Bean
-  public JwtDecoder jwtDecoder() throws IOException {
+  JwtDecoder jwtDecoder() throws IOException {
     var local = ResourceUtils.isFileURL(openTmfSecurityProperties.getJwkSetUri().getURL());
     return local ? customJwtDecoder() : defaultJwtDecoder();
   }

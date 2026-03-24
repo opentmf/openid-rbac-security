@@ -1,161 +1,124 @@
 # openid-rbac-security
-OpenID, Role Based Access Control (RBAC) Security Library
 
-## Description
-This autoconfiguration library uses Spring Boot Security and Spring Boot oauth2 resource server for enabling Bearer Token authentication.
+OpenID Role-Based Access Control (RBAC) security library for Spring Boot.
 
-Depending on the web application type, a servlet or reactive security scheme will be configured.
+## Overview
 
-The following can be specified using configuration properties:
-- The required roles can be specified for the particular API endpoints, together with the HTTP methods.
-- The allowed endpoints can be specified together with the HTTP method.
-- The whitelisted endpoints can be specified or all HTTP methods.
+A Spring Boot auto-configuration library that enables Bearer Token authentication using Spring Security OAuth2 Resource Server. It supports both **servlet** and **reactive** web application types automatically.
 
-**Important:** Protected but not configured endpoints will cause HTTP 403, Forbidden. If you don't want this to happen, define all protected endpoints in the openid-rbac-security.
+Configure endpoint security declaratively through properties:
 
-## Usage
+- **Secure endpoints** -- require specific roles for given HTTP method + path combinations.
+- **Allowed endpoints** -- bypass security for specific HTTP method + path combinations.
+- **Whitelist** -- bypass security for paths regardless of HTTP method.
+- **Blacklist** -- deny access to paths regardless of HTTP method.
 
-### pom.xml
-Add this dependency:
+Any endpoint that is protected but not explicitly configured will return **HTTP 403 Forbidden**.
+
+### Requirements
+
+- Java 17+
+- Spring Boot 4.0+
+
+## Getting Started
+
+### Maven Dependency
+
 ```xml
-<project>
+<dependency>
+  <groupId>org.opentmf.security</groupId>
+  <artifactId>openid-rbac-security</artifactId>
+  <version><!-- latest version --></version>
+</dependency>
+```
 
-  <dependencyManagement>
-    <dependencies>
-      <dependency>
-        <groupId>org.opentmf</groupId>
-        <artifactId>opentmf-versions</artifactId>
-        <type>pom</type>
-        <scope>import</scope>
-        <version>RELEASE</version>
-      </dependency>
-    </dependencies>
-  </dependencyManagement>
+Or, if you use the OpenTMF BOM:
 
+```xml
+<dependencyManagement>
   <dependencies>
     <dependency>
-      <groupId>org.opentmf.security</groupId>
-      <artifactId>openid-rbac-security</artifactId>
+      <groupId>org.opentmf</groupId>
+      <artifactId>opentmf-versions</artifactId>
+      <version><!-- BOM version --></version>
+      <type>pom</type>
+      <scope>import</scope>
     </dependency>
   </dependencies>
+</dependencyManagement>
 
-</project>
+<dependencies>
+  <dependency>
+    <groupId>org.opentmf.security</groupId>
+    <artifactId>openid-rbac-security</artifactId>
+  </dependency>
+</dependencies>
 ```
 
-### Sample Configuration
+### Example Configuration
+
 ```yaml
----
 opentmf:
   security:
-    jwk-set-uri: https://keycloak:8000/realms/test/protocol/openid-connect/certs
+    jwk-set-uri: https://keycloak:8000/realms/myrealm/protocol/openid-connect/certs
     user-claim: email
-    fallback-user-claims: client_id, azp, appid, sub
+    fallback-user-claims: client_id, azp, sub
     authorities-claim: groups
+
     secure-endpoints:
       - method: POST
-        path: /order
-        roles:
-          - write
-          - ENTERPRISE-GUI/ADMIN_ALL
-          - ENTERPRISE-API/ADMIN_ALL
+        path: /orders
+        roles: [write, admin]
       - method: GET
-        path: /engine-rest/process-definition/*/xml
-        roles:
-          - read
-          - ENTERPRISE-GUI/ADMIN_ALL
-          - ENTERPRISE-API/ADMIN_ALL
-      - method: PUT
-        path: /engine-rest/task/*
-        roles:
-          - write
-          - ENTERPRISE-GUI/ADMIN_ALL
-          - ENTERPRISE-API/ADMIN_ALL
-  
+        path: /orders/*/details
+        roles: [read, admin]
+
     allowed-endpoints:
       - method: GET
-        path: /order/**
-      - method: PUT
-        path: /greetings
-  
+        path: /orders/**
+
     whitelist:
-      - /error
-      - /info
-      - /actuator
       - /actuator/**
+      - /info
 
     blacklist:
-      - /swagger-ui.html
       - /swagger-ui/**
-      - /swagger-resources/**
-      - /webjars/**
 ```
 
-### Configuration Properties
+## Configuration Reference
 
-#### `user-claim`
-The JWT claim name to use as the principal (user identifier). Defaults to `sub` if not specified.
+All properties live under the `opentmf.security` prefix.
 
-**Example:** `user-claim: email`
+| Property | Default | Description |
+|---|---|---|
+| `jwk-set-uri` | *(required)* | URL or resource path to the JWK Set (e.g. Keycloak certs endpoint, or `classpath:jwk-set.json`). |
+| `user-claim` | `sub` | JWT claim to use as the principal (user identifier). |
+| `fallback-user-claims` | *(empty)* | Ordered list of fallback claims when `user-claim` is absent. Useful for `client_credentials` tokens. |
+| `authorities-claim` | `roles` | JWT claim containing the user's roles/authorities. |
+| `secure-endpoints` | *(empty)* | List of `{method, path, roles}` entries requiring specific authorities. |
+| `allowed-endpoints` | *(empty)* | List of `{method, path}` entries that bypass security. |
+| `whitelist` | *(empty)* | List of path patterns that bypass security for all HTTP methods. |
+| `blacklist` | *(empty)* | List of path patterns denied for all HTTP methods. |
 
-#### `fallback-user-claims`
-A list of fallback claim names to use when the primary `user-claim` is not present in the JWT token. This is particularly useful when using `client_credentials` grant type, where user-specific claims (like `email`) may not be present.
+### Nested claims
 
-The fallback claims are tried in order until one is found. If none of the fallback claims are found, the JWT `sub` (subject) claim is used as a final fallback.
+Both `user-claim`, `fallback-user-claims`, and `authorities-claim` support **dot notation** for nested JWT claims (e.g. `realm_access.roles`, `user.email`).
 
-**Supports nested claims** using dot notation (e.g., `user.email`, `client_info.client_id`, `realm_access.client_id`).
+### Fallback user claims
 
-**Example:** `fallback-user-claims: client_id, azp, appid, user.email, sub`
+When the primary `user-claim` is not present in a token (common with `client_credentials` grant), the library tries each `fallback-user-claims` entry in order. If none are found, the JWT `sub` claim is used as a final fallback.
 
-**Use Case:** When your application needs to support both:
-- **Password grant tokens** (user authentication) - contains `email` claim
-- **Client credentials tokens** (service-to-service) - contains `client_id`, `azp`, or `appid` but not `email`
-
-**Configuration Example:**
 ```yaml
 opentmf:
   security:
-    user-claim: email              # Primary claim for user tokens
-    fallback-user-claims:          # Fallback claims for service tokens
-      - client_id                   # Simple claim
-      - azp                         # Simple claim
-      - appid                       # Simple claim
-      - user.email                  # Nested claim (if user object contains email)
-      - client_info.client_id       # Nested claim (if client_info object contains client_id)
-      - sub                         # Final fallback (always present in valid JWTs)
+    user-claim: email
+    fallback-user-claims: client_id, azp, sub
 ```
 
-#### `authorities-claim`
-The JWT claim name that contains the user roles/authorities. Defaults to `roles` if not specified.
+## Changelog
 
-**Example:** `authorities-claim: groups`
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-Supports nested claims using dot notation (e.g., `realm_access.roles`).
+## License
 
-## Version History
-### 1.0.0
-  - Initial revision
-### 1.0.1
-  - Started including source code
-  - Started allowing local file for jwk-set-uri
-### 1.0.2
-  - **Incompatible change**: Configuration prefix is now **pia.security**.
-### 1.0.3
-  - Removed blocking hardcoded swagger endpoints
-  - Added new configuration property `blacklist` that allows specifying endpoints to be blocked
-### 1.0.4
-  - **Bugfix**: We now support deeper levels for pia.security.authorities-claim
-### 1.0.5
-  - **Bugfix**: Fix the support for handling deeper levels for pia.security.authorities-claim
-### 1.0.6
-  - **Improvement**: Both whitelist and blacklist have been made optional.
-### 1.0.7
-  - **Bugfix**: Fixed conditional typo on configureWhitelist on ServletSecurityAutoConfiguration
-### 1.0.8
-  - **Bugfix**: Fixed jwk-set-uri local file retrievals for enabling easier IT tests.
-### 1.0.9
-  - **Bugfix**: Fixed cors headers configuration to obey the application configuration.
-### 1.1.0
-- Initial Open Source Release, replacing pia with opentmf
-
-### 1.1.1
-- **New Feature**: Added `fallback-user-claims` configuration property to support fallback claim extraction when the primary `user-claim` is not present in the JWT token. This enables support for both password grant tokens (with user claims like `email`) and client_credentials grant tokens (with service claims like `client_id`, `azp`, `appid`). The fallback mechanism tries claims in order and falls back to JWT `sub` if none are found.
+[Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0)

@@ -33,7 +33,7 @@ public class ReactiveJwtAutoConfiguration {
   private final OpenTmfSecurityProperties openTmfSecurityProperties;
 
   @Bean
-  public ReactiveJwtDecoder reactiveJwtDecoder2() throws IOException {
+  ReactiveJwtDecoder reactiveJwtDecoder2() throws IOException {
     var local = ResourceUtils.isFileURL(openTmfSecurityProperties.getJwkSetUri().getURL());
     return local ? customReactiveJwtDecoder() : defaultReactiveJwtDecoder();
   }
