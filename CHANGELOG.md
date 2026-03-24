@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [2.0.0] - 2026-03-24
 
 ### Changed
 - **Breaking:** Upgraded to Spring Boot 4.0.4 (from 3.5.9), bringing Spring Framework 7.x, Spring Security 7.0, Jackson 3, and Testcontainers 2.0.
