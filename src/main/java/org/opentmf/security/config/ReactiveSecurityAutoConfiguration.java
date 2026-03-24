@@ -50,7 +50,7 @@ public class ReactiveSecurityAutoConfiguration {
   private final ReactiveJwtDecoder reactiveJwtDecoder;
 
   @Bean
-  public SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
+  SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
     return http
         .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
         .csrf(CsrfSpec::disable)

@@ -11,10 +11,8 @@ import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ServletJwtPrincipalConverter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
-import org.springframework.boot.autoconfigure.AutoConfigureAfter;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
-import org.springframework.boot.autoconfigure.web.reactive.function.client.WebClientAutoConfiguration;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.core.convert.converter.Converter;
@@ -44,14 +42,13 @@ import org.springframework.util.CollectionUtils;
 @EnableConfigurationProperties(OpenTmfSecurityProperties.class)
 @RequiredArgsConstructor
 @ConditionalOnWebApplication(type = Type.SERVLET)
-@AutoConfigureAfter(WebClientAutoConfiguration.class)
 public class ServletSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties openTmfSecurityProperties;
   private final JwtDecoder jwtDecoder;
 
   @Bean
-  public SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) throws Exception {
+  SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) {
     return http
         .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
         .csrf(CsrfConfigurer::disable)
