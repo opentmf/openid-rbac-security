@@ -2,6 +2,30 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.1.0] - 2026-04-24
+
+### Changed
+- **Behavior change for consumers with `management.server.port` set to a value different from `server.port`.** Actuator endpoints on the management port that were previously reachable anonymously now require an authenticated JWT, except for the default `whitelist` (`/actuator/health`, `/actuator/health/**`, `/actuator/info`). Consumers that scrape `/actuator/prometheus`, `/actuator/metrics`, `/actuator/loggers`, or any other non-default management endpoint without authentication must either add those paths to the new `opentmf.security.management.whitelist` property, or reconfigure their scraper to present a JWT. Consumers who do not set `management.server.port`, or who set it equal to `server.port`, are unaffected (the main-port filter chain already governed those endpoints).
+
+### Added
+- **`opentmf.security.other-endpoints` for the main port.** New top-level enum property controlling the catch-all policy for requests not matched by `blacklist`, `whitelist`, `allowed-endpoints`, or `secure-endpoints`. Values: `allow` (permit anonymously), `deny`, `authenticated` (require any valid JWT). Defaults to `deny`, preserving the historical hard-coded behavior — consumers who never set this property see no functional difference.
+- **JWT-authenticated management port.** When consumers set `management.server.port` to a value different from `server.port`, the library now registers a second `SecurityFilterChain` (servlet) / `SecurityWebFilterChain` (reactive) in the management child `ApplicationContext`. The chain reuses the existing `JwtDecoder` and authorities converter from the parent context, so no JWT wiring is duplicated.
+- New configuration section `opentmf.security.management`. Property names mirror the main-port section so configuration knowledge transfers directly:
+  - `blacklist` (paths denied for all HTTP methods).
+  - `whitelist` (defaults to `/actuator/health`, `/actuator/health/**`, `/actuator/info` — commonly probed by infrastructure without auth).
+  - `allowed-endpoints` (method-specific paths that bypass authentication).
+  - `secure-endpoints` (role-gated method-specific paths).
+  - `other-endpoints` (catch-all policy; same enum as the main port, but defaults to `authenticated` instead of `deny`). The default differs because actuator endpoints are well-known and most consumers want every exposed endpoint reachable with any valid JWT without enumerating each one. Set to `deny` for main-port-style symmetry.
+- Registered via a new `META-INF/spring/org.springframework.boot.actuate.autoconfigure.web.ManagementContextConfiguration.imports` file and gated by `OnSeparateManagementPortCondition`, so the management auto-configs only load into the management child context and only when the two ports genuinely differ.
+- Startup `WARN` logs for two misconfiguration cases, gated on actuator being on the classpath:
+  - `opentmf.security.management.*` configured but ports coincide (block will be ignored — consumer probably expected otherwise).
+  - Ports differ but no `management` block configured (library defaults govern — consumer who scrapes `/actuator/prometheus` etc. without a JWT likely needs to add it to `whitelist`).
+- `spring-boot-actuator-autoconfigure` declared as an optional dependency so the new code compiles; consumers must bring `spring-boot-starter-actuator` themselves to activate the management-port behavior.
+
+### Notes
+- Spring Boot's own `management.endpoint.env.show-values: when_authorized` (and `show-components`) now works as intended when this library is on the classpath — previously the check always returned "unauthorized" on a separate management port because no filter populated the `SecurityContext`.
+- Source and binary compatibility preserved. No public API removed; only additions. Consumers who never set `management.server.port` see no functional difference.
+
 ## [2.0.0] - 2026-03-24
 
 ### Changed

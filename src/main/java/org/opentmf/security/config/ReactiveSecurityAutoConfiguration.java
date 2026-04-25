@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ReactiveJwtPrincipalConverter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
+import org.opentmf.security.model.OtherEndpoints;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
@@ -93,8 +94,17 @@ public class ReactiveSecurityAutoConfiguration {
       configureWhiteList(exchanges);
       configureAllowedEndpoints(exchanges);
       configureSecureEndpoints(exchanges);
-      exchanges.anyExchange().denyAll();
+      configureOtherEndpoints(exchanges);
     };
+  }
+
+  private void configureOtherEndpoints(AuthorizeExchangeSpec exchanges) {
+    OtherEndpoints policy = openTmfSecurityProperties.getOtherEndpoints();
+    switch (policy) {
+      case ALLOW -> exchanges.anyExchange().permitAll();
+      case DENY -> exchanges.anyExchange().denyAll();
+      case AUTHENTICATED -> exchanges.anyExchange().authenticated();
+    }
   }
 
   private void configureAllowedEndpoints(AuthorizeExchangeSpec exchanges) {

@@ -1,0 +1,2 @@
+org.opentmf.security.config.management.ServletManagementSecurityAutoConfiguration
+org.opentmf.security.config.management.ReactiveManagementSecurityAutoConfiguration

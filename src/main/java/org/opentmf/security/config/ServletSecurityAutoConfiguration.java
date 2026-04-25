@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ServletJwtPrincipalConverter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
+import org.opentmf.security.model.OtherEndpoints;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
@@ -68,7 +69,17 @@ public class ServletSecurityAutoConfiguration {
     configureWhitelist(requests);
     configureAllowedEndpoints(requests);
     configureSecureEndpoints(requests);
-    requests.anyRequest().denyAll();
+    configureOtherEndpoints(requests);
+  }
+
+  private void configureOtherEndpoints(
+      AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
+    OtherEndpoints policy = openTmfSecurityProperties.getOtherEndpoints();
+    switch (policy) {
+      case ALLOW -> requests.anyRequest().permitAll();
+      case DENY -> requests.anyRequest().denyAll();
+      case AUTHENTICATED -> requests.anyRequest().authenticated();
+    }
   }
 
   private void configureWhitelist(

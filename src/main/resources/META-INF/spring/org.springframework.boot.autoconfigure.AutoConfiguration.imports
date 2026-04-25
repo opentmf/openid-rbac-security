@@ -2,3 +2,4 @@ org.opentmf.security.config.ReactiveSecurityAutoConfiguration
 org.opentmf.security.config.ServletSecurityAutoConfiguration
 org.opentmf.security.config.ServletJwtAutoConfiguration
 org.opentmf.security.config.ReactiveJwtAutoConfiguration
+org.opentmf.security.config.management.ManagementSecurityWarnerAutoConfiguration
