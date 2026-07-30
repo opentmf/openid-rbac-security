@@ -46,7 +46,7 @@ public class ReactiveJwtAutoConfiguration {
   private ReactiveJwtDecoder customReactiveJwtDecoder() {
     ReactiveResourceRetriever reactiveJwkSource = new ReactiveResourceRetriever(
         openTmfSecurityProperties.getJwkSetUri());
-    Function<SignedJWT, Flux<JWK>> jwkSource = reactiveJwkSource::getKeys;
+    Function<SignedJWT, Flux<JWK>> jwkSource = signedJwt -> reactiveJwkSource.getKeys();
     return NimbusReactiveJwtDecoder.withJwkSource(jwkSource).build();
   }
 }

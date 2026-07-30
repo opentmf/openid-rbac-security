@@ -1,8 +1,9 @@
 package org.opentmf.security.util;
 
+import static org.opentmf.security.util.ResourceRetrieverSupport.contents;
+
 import com.nimbusds.jose.jwk.JWK;
 import com.nimbusds.jose.jwk.JWKSet;
-import com.nimbusds.jwt.SignedJWT;
 import java.io.FileInputStream;
 import java.io.IOException;
 import lombok.RequiredArgsConstructor;
@@ -12,11 +13,11 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 @RequiredArgsConstructor
-public class ReactiveResourceRetriever extends BaseResourceRetriever {
+public class ReactiveResourceRetriever {
 
   private final Resource jwkSetUri;
 
-  public Flux<JWK> getKeys(SignedJWT signedJWT) {
+  public Flux<JWK> getKeys() {
     try {
       var url = jwkSetUri.getURL();
       String content = contents(new FileInputStream(ResourceUtils.getFile(url)));

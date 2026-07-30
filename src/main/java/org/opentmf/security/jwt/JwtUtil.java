@@ -76,52 +76,50 @@ public final class JwtUtil {
       return null;
     }
 
+    Object claim;
     try {
-      Object claim;
-
-      // Handle nested claims (e.g., "user.email", "realm_access.client_id")
-      if (claimName.contains(".")) {
-        String[] parts = claimName.split("\\.");
-        Object current = jwt.getClaim(parts[0]);
-        for (int i = 1; i < parts.length && current != null; i++) {
-          if (current instanceof Map<?, ?> map) {
-            current = map.get(parts[i]);
-          } else {
-            return null;
-          }
-        }
-        claim = current;
-      } else {
-        // Simple claim
-        claim = jwt.getClaim(claimName);
-      }
-
-      if (claim == null) {
-        return null;
-      }
-
-      if (claim instanceof String) {
-        return (String) claim;
-      } else if (claim instanceof Collection<?> c) {
-        throw new IllegalStateException(
-            "Claim '" + claimName + "' resolved to a collection (" + c.getClass().getSimpleName() + "), not a scalar.");
-      } else if (claim.getClass().isArray()) {
-        throw new IllegalStateException(
-            "Claim '" + claimName + "' resolved to an array (" + claim.getClass().getSimpleName() + "), not a scalar.");
-      } else if (claim instanceof Map<?, ?>) {
-        throw new IllegalStateException(
-            "Claim '" + claimName + "' resolved to a Map, not a scalar.");
-      } else if (claim != null) {
-        // Convert other types to String
-        return claim.toString();
-      }
-    } catch (IllegalStateException e) {
-      // Re-throw IllegalStateException (for Collections/Arrays/Maps)
-      throw e;
+      claim = resolveClaim(jwt, claimName);
     } catch (Exception e) {
       log.debug("Failed to extract claim '{}' from JWT: {}", claimName, e.getMessage());
+      return null;
     }
+    return claim == null ? null : scalarToString(claim, claimName);
+  }
 
-    return null;
+  /** Resolves a claim, navigating nested maps when the name uses dot notation. */
+  private static Object resolveClaim(Jwt jwt, String claimName) {
+    if (!claimName.contains(".")) {
+      return jwt.getClaim(claimName);
+    }
+    String[] parts = claimName.split("\\.");
+    Object current = jwt.getClaim(parts[0]);
+    for (int i = 1; i < parts.length && current != null; i++) {
+      if (current instanceof Map<?, ?> map) {
+        current = map.get(parts[i]);
+      } else {
+        return null;
+      }
+    }
+    return current;
+  }
+
+  /** Converts a non-null scalar claim to String; rejects collections, arrays, and maps. */
+  private static String scalarToString(Object claim, String claimName) {
+    if (claim instanceof String string) {
+      return string;
+    }
+    if (claim instanceof Collection<?> collection) {
+      throw new IllegalStateException("Claim '" + claimName + "' resolved to a collection ("
+          + collection.getClass().getSimpleName() + "), not a scalar.");
+    }
+    if (claim.getClass().isArray()) {
+      throw new IllegalStateException("Claim '" + claimName + "' resolved to an array ("
+          + claim.getClass().getSimpleName() + "), not a scalar.");
+    }
+    if (claim instanceof Map<?, ?>) {
+      throw new IllegalStateException(
+          "Claim '" + claimName + "' resolved to a Map, not a scalar.");
+    }
+    return claim.toString();
   }
 }

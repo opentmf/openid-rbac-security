@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.2.0] - 2026-07-30
+
+### Added
+- **Pluggable 401/403 response handlers for the main port.** Consumers can now take over the rendering of authentication (401) and URL-authorization (403) failures, which are decided in the security filter chain before the `DispatcherServlet` / `DispatcherHandler` and therefore never reach a `@RestControllerAdvice`. The switch is bean presence — no new configuration properties. Servlet consumers define `AuthenticationEntryPoint` and/or `AccessDeniedHandler` beans; reactive consumers define `ServerAuthenticationEntryPoint` and/or `ServerAccessDeniedHandler` beans. **Consumers that define no such beans see zero behavior change** — the RFC 6750 defaults (status + `WWW-Authenticate` header, empty body) remain exactly as before.
+- A supplied handler is applied at both relevant points of the chain: the bearer-token path (invalid/expired/malformed tokens, insufficient scope) and the exception-translation path (no token on a protected URL, role-based denials). Each handler is independent; defining only one of the two is supported.
+- If multiple candidate beans of one handler type exist, the library refuses to guess: it logs a `WARN` naming all candidates and keeps the Spring Security default for that handler. Marking one candidate `@Primary` resolves the ambiguity.
+- README gained a "Customizing 401/403 responses" section with the plain-beans recipe, the per-stack "one place for all error rendering" recipes (servlet: delegate to `handlerExceptionResolver`; reactive: shared renderer component, including why the `Mono.error` delegate variant is a 500-producing trap), and a matrix of which failure takes which path.
+- Method-security (`@PreAuthorize`) denials keep flowing to consumer advice unchanged, and the management port deliberately keeps the RFC 6750 defaults — custom handlers apply to the main port only.
+
+### Changed
+- `ReactiveResourceRetriever.getKeys(SignedJWT)` is now `getKeys()` — the parameter was unused
+  (the retriever always returns the full JWK set from the configured resource; key selection
+  happens in the decoder). Only relevant to consumers calling this internal wiring utility
+  directly, which the library never required.
+
+### Fixed
+- **Servlet management-port security (introduced in 2.1.0) was ineffective.** On the servlet stack, Spring Boot's `ServletManagementChildContextConfiguration` exposes the *parent* context's `springSecurityFilterChain` inside the management child context, overriding the child's own `@EnableWebSecurity` setup — so the management `SecurityFilterChain` this library registered in the child context was built but never consulted, and the management port was actually governed by the main-port rules (with the default catch-all `deny`, all actuator endpoints — including `/actuator/health` — required authorization and probes would receive 401 regardless of the `opentmf.security.management.*` configuration). The management chain is now registered in the main context, matched by the request's local port (captured from the management server's `WebServerInitializedEvent`, so random ports work), at highest precedence. Servlet consumers with a separate management port now get the behavior documented in 2.1.0: the `opentmf.security.management.*` block (or its defaults) genuinely governs the management port. The reactive stack was not affected — its child context builds and uses its own `SecurityWebFilterChain`.
+- The defect was masked in this library's own integration tests by the test application's component scan leaking the management chain into the main context; the test application now excludes `@ManagementContextConfiguration` classes from scanning, and the management ITs assert the enforced behavior for real.
+
 ## [2.1.0] - 2026-04-24
 
 ### Changed

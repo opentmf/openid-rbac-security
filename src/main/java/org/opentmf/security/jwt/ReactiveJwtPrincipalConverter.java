@@ -1,16 +1,9 @@
 package org.opentmf.security.jwt;
 
-import static org.opentmf.security.jwt.JwtUtil.extractClaimValueAsString;
-
-import java.util.Collection;
 import java.util.List;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
-import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import reactor.core.publisher.Mono;
 
 /**
@@ -23,63 +16,19 @@ import reactor.core.publisher.Mono;
  *
  * @author Gokhan Demir
  */
-@Slf4j
-@RequiredArgsConstructor
-public class ReactiveJwtPrincipalConverter implements Converter<Jwt, Mono<? extends AbstractAuthenticationToken>> {
+public class ReactiveJwtPrincipalConverter
+    implements Converter<Jwt, Mono<? extends AbstractAuthenticationToken>> {
 
-  private final String primaryClaimName;
-  private final List<String> fallbackClaimNames;
-  private final GrantedAuthoritiesConverter authoritiesConverter;
+  private final JwtPrincipalExtractor extractor;
+
+  public ReactiveJwtPrincipalConverter(String primaryClaimName, List<String> fallbackClaimNames,
+      GrantedAuthoritiesConverter authoritiesConverter) {
+    this.extractor =
+        new JwtPrincipalExtractor(primaryClaimName, fallbackClaimNames, authoritiesConverter);
+  }
 
   @Override
   public Mono<? extends AbstractAuthenticationToken> convert(Jwt jwt) {
-    // Extract principal using fallback logic
-    String principal = extractPrincipalWithFallback(jwt);
-    
-    // Extract authorities
-    Collection<GrantedAuthority> authorities = authoritiesConverter != null 
-        ? authoritiesConverter.convert(jwt)
-        : List.of();
-    
-    return Mono.just(new JwtAuthenticationToken(jwt, authorities, principal));
-  }
-
-  /**
-   * Extracts the principal from the JWT using the primary claim first, then fallback claims.
-   *
-   * @param jwt the JWT token
-   * @return the principal name, or null if not found
-   */
-  private String extractPrincipalWithFallback(Jwt jwt) {
-    // Try primary claim first
-    String principal = extractClaimValueAsString(jwt, primaryClaimName);
-    if (principal != null && !principal.isEmpty()) {
-      log.trace("Extracted principal from primary claim '{}'", primaryClaimName);
-      return principal;
-    }
-
-    // Try fallback claims in order
-    if (fallbackClaimNames != null && !fallbackClaimNames.isEmpty()) {
-      for (String fallbackClaim : fallbackClaimNames) {
-        principal = extractClaimValueAsString(jwt, fallbackClaim);
-        if (principal != null && !principal.isEmpty()) {
-          log.trace("Extracted principal from fallback claim '{}'", fallbackClaim);
-          return principal;
-        }
-      }
-    }
-
-    // If no claim found in primary or fallback claims, fall back to JWT subject
-    // The 'sub' claim is always present in valid JWTs and provides a meaningful identifier
-    String subject = jwt.getSubject();
-    if (subject != null && !subject.isEmpty()) {
-      log.trace("No principal found in primary or fallback claims, using JWT subject");
-      return subject;
-    }
-
-    // This should rarely happen as 'sub' is required in valid JWTs
-    log.warn("No principal could be extracted from JWT. Tried primary claim '{}', fallback claims: {}, and subject",
-        primaryClaimName, fallbackClaimNames);
-    return null;
+    return Mono.just(extractor.token(jwt));
   }
 }

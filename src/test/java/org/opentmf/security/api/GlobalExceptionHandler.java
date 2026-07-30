@@ -6,6 +6,8 @@ import org.opentmf.security.exception.CarNotFoundException;
 import org.opentmf.security.model.ErrorContext;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.servlet.mvc.method.annotation.ResponseEntityExceptionHandler;
@@ -28,6 +30,25 @@ class GlobalExceptionHandler extends ResponseEntityExceptionHandler {
     var message = e.getLocalizedMessage();
     return ResponseEntity.status(HttpStatus.NOT_FOUND.value())
         .body(errorContext(message, HttpStatus.NOT_FOUND.value()));
+  }
+
+  /**
+   * Only reached when a test config delegates the security entry point to the
+   * {@code HandlerExceptionResolver}; the filter chain otherwise handles these before the
+   * DispatcherServlet.
+   */
+  @ExceptionHandler(AuthenticationException.class)
+  public ResponseEntity<ErrorContext> handle(AuthenticationException e) {
+    var message = e.getLocalizedMessage();
+    return ResponseEntity.status(HttpStatus.UNAUTHORIZED.value())
+        .body(errorContext(message, HttpStatus.UNAUTHORIZED.value()));
+  }
+
+  @ExceptionHandler(AccessDeniedException.class)
+  public ResponseEntity<ErrorContext> handle(AccessDeniedException e) {
+    var message = e.getLocalizedMessage();
+    return ResponseEntity.status(HttpStatus.FORBIDDEN.value())
+        .body(errorContext(message, HttpStatus.FORBIDDEN.value()));
   }
 
   private ErrorContext errorContext(String message, int status) {

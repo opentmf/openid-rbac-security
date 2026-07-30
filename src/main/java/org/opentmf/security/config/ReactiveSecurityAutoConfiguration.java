@@ -2,6 +2,7 @@ package org.opentmf.security.config;
 
 import static org.opentmf.security.config.CommonConfig.authoritiesClaimName;
 import static org.opentmf.security.config.CommonConfig.principalClaimName;
+import static org.opentmf.security.config.UniqueBeanResolver.resolveUnique;
 import static org.springframework.security.config.Customizer.withDefaults;
 
 import java.util.List;
@@ -10,6 +11,7 @@ import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ReactiveJwtPrincipalConverter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
@@ -23,6 +25,7 @@ import org.springframework.security.config.annotation.web.reactive.EnableWebFlux
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity.AuthorizeExchangeSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.CsrfSpec;
+import org.springframework.security.config.web.server.ServerHttpSecurity.ExceptionHandlingSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.FormLoginSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
@@ -30,6 +33,8 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2R
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
+import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
+import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.util.CollectionUtils;
 import reactor.core.publisher.Mono;
@@ -49,9 +54,13 @@ public class ReactiveSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties openTmfSecurityProperties;
   private final ReactiveJwtDecoder reactiveJwtDecoder;
+  private final ObjectProvider<ServerAuthenticationEntryPoint> authenticationEntryPoints;
+  private final ObjectProvider<ServerAccessDeniedHandler> accessDeniedHandlers;
 
   @Bean
   SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
+    var entryPoint = resolveUnique(authenticationEntryPoints, ServerAuthenticationEntryPoint.class);
+    var accessDeniedHandler = resolveUnique(accessDeniedHandlers, ServerAccessDeniedHandler.class);
     return http
         .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
         .csrf(CsrfSpec::disable)
@@ -61,16 +70,49 @@ public class ReactiveSecurityAutoConfiguration {
         .headers(withDefaults())
         .cors(withDefaults())
         .authorizeExchange(applyOpenTmfSecurityDefinitions())
-        .oauth2ResourceServer(configureResourceServer())
+        .exceptionHandling(handling ->
+            configureExceptionHandling(handling, entryPoint, accessDeniedHandler))
+        .oauth2ResourceServer(configureResourceServer(entryPoint, accessDeniedHandler))
         .build();
   }
 
-  private Customizer<OAuth2ResourceServerSpec> configureResourceServer() {
-    return resourceServer ->
-        resourceServer.jwt(jwt -> jwt
-            .jwtDecoder(reactiveJwtDecoder)
-            .jwtAuthenticationConverter(jwtAuthenticationConverter())
-        );
+  /**
+   * Applies the consumer-supplied handlers on the {@code ExceptionTranslationWebFilter} path: an
+   * anonymous request hitting a protected URL (401) and authorization denials for authenticated
+   * users (403). Leaving a handler unset keeps that path on the Spring Security default.
+   */
+  private void configureExceptionHandling(
+      ExceptionHandlingSpec handling,
+      ServerAuthenticationEntryPoint entryPoint,
+      ServerAccessDeniedHandler accessDeniedHandler) {
+    if (entryPoint != null) {
+      handling.authenticationEntryPoint(entryPoint);
+    }
+    if (accessDeniedHandler != null) {
+      handling.accessDeniedHandler(accessDeniedHandler);
+    }
+  }
+
+  /**
+   * Besides the JWT wiring, applies the consumer-supplied handlers on the bearer-token path:
+   * invalid / expired / malformed tokens (401) and insufficient-scope denials (403), which the
+   * bearer {@code AuthenticationWebFilter} handles before the {@code ExceptionTranslationWebFilter}
+   * ever sees them.
+   */
+  private Customizer<OAuth2ResourceServerSpec> configureResourceServer(
+      ServerAuthenticationEntryPoint entryPoint, ServerAccessDeniedHandler accessDeniedHandler) {
+    return resourceServer -> {
+      resourceServer.jwt(jwt -> jwt
+          .jwtDecoder(reactiveJwtDecoder)
+          .jwtAuthenticationConverter(jwtAuthenticationConverter())
+      );
+      if (entryPoint != null) {
+        resourceServer.authenticationEntryPoint(entryPoint);
+      }
+      if (accessDeniedHandler != null) {
+        resourceServer.accessDeniedHandler(accessDeniedHandler);
+      }
+    };
   }
 
   private Converter<Jwt, Mono<? extends AbstractAuthenticationToken>> jwtAuthenticationConverter() {

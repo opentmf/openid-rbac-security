@@ -4,11 +4,14 @@ import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import lombok.AccessLevel;
+import lombok.NoArgsConstructor;
 
 /**
  * @author Gokhan Demir
  */
-abstract class BaseResourceRetriever {
+@NoArgsConstructor(access = AccessLevel.PRIVATE)
+final class ResourceRetrieverSupport {
 
   static String contents(InputStream inputStream) {
     try {

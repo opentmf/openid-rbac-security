@@ -119,7 +119,9 @@ opentmf:
 
 When you set Spring Boot's `management.server.port` to a value different from `server.port`, actuator endpoints are served from a separate child `ApplicationContext`. That context does **not** inherit the main port's `SecurityFilterChain`, so without this library actuator would be exposed unauthenticated and `management.endpoint.env.show-values: when_authorized` could never see an authenticated principal.
 
-This library reacts to that configuration and registers a second JWT-authenticated `SecurityFilterChain` (servlet) / `SecurityWebFilterChain` (reactive) in the management child context, reusing the same `JwtDecoder` and authorities converter as the main port. No additional wiring is required; just set `management.server.port` and supply a valid `opentmf.security.jwk-set-uri`.
+This library reacts to that configuration and registers a second JWT-authenticated filter chain governing the management port, reusing the same `JwtDecoder` and authorities converter as the main port. No additional wiring is required; just set `management.server.port` and supply a valid `opentmf.security.jwk-set-uri`.
+
+Where that chain lives differs per stack, for a Spring Boot reason worth knowing: on the **servlet** stack, Boot exposes the *parent* context's `springSecurityFilterChain` inside the management child context, so any chain registered in the child is never consulted. The library therefore registers the management `SecurityFilterChain` in the **main** context, matched by the request's local port (highest precedence, so it wins over the main chain for management-port requests only). On the **reactive** stack the child context genuinely builds its own `SecurityWebFilterChain`, so the chain is registered there. Configuration and observable behavior are identical on both stacks.
 
 ### Defaults
 
@@ -195,6 +197,104 @@ Spring Boot's `management.endpoint.env.show-values: when_authorized` (and `show-
 ### When ports coincide
 
 If you do not set `management.server.port`, or you set it equal to `server.port`, actuator shares the main connector and the main filter chain already governs it. In that mode the management auto-configuration stays inert; configure `/actuator/**` paths via the standard `whitelist`, `secure-endpoints`, or `allowed-endpoints` properties on the main port. The library logs a `WARN` whenever an `opentmf.security.management.*` block is configured but the two ports are not actually separate — whether `management.server.port` is unset *or* explicitly set to the same value as `server.port`. The warning indicates that the entire `opentmf.security.management` block is being ignored and the deployer should take action.
+
+## Customizing 401/403 responses
+
+Authentication (401) and URL-authorization (403) failures are decided inside the Spring Security filter chain, **before** the `DispatcherServlet` / `DispatcherHandler` — so a `@RestControllerAdvice` never sees them, and by default they produce the RFC 6750 response: correct status code plus `WWW-Authenticate` header, **empty body**.
+
+Since 2.2.0 the library lets a consumer take over the rendering of these responses. The switch is **bean presence** — no configuration properties:
+
+- **Servlet** consumers define an `AuthenticationEntryPoint` (401) and/or an `AccessDeniedHandler` (403) bean.
+- **Reactive** consumers define a `ServerAuthenticationEntryPoint` (401) and/or a `ServerAccessDeniedHandler` (403) bean.
+
+If a bean of the respective type is present, the library applies it at **both** relevant points of its filter chain (the bearer-token path *and* the exception-translation path — see the matrix below). If no bean is present, behavior is exactly the pre-2.2.0 default. Each handler is independent: you may define only one of the two.
+
+If **multiple candidate beans** of one type exist, the library refuses to guess: it logs a `WARN` naming all candidates and falls back to the default for that handler. Mark exactly one candidate `@Primary` to resolve the ambiguity.
+
+### Plain beans
+
+Render whatever body format your service standardizes on:
+
+```java
+@Bean
+AuthenticationEntryPoint problemDetailEntryPoint() {
+  return (request, response, exception) -> {
+    response.setStatus(401);
+    response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+    response.getWriter().write("""
+        {"status":401,"title":"Unauthorized"}""");
+  };
+}
+
+@Bean
+AccessDeniedHandler problemDetailAccessDeniedHandler() {
+  return (request, response, exception) -> {
+    response.setStatus(403);
+    response.setContentType(MediaType.APPLICATION_PROBLEM_JSON_VALUE);
+    response.getWriter().write("""
+        {"status":403,"title":"Forbidden"}""");
+  };
+}
+```
+
+The reactive equivalents implement `ServerAuthenticationEntryPoint` / `ServerAccessDeniedHandler` and write to the `ServerWebExchange` response.
+
+### One place for all error rendering
+
+Most services want security errors to look exactly like every other error. The recommended recipe differs per stack because the underlying dispatch machinery differs.
+
+**Servlet — delegate to your advice.** Delegate both handlers to the `handlerExceptionResolver` bean; the exception is then routed into your `@RestControllerAdvice` like any MVC exception:
+
+```java
+@Bean
+AuthenticationEntryPoint delegatingEntryPoint(
+    @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {
+  return (request, response, exception) ->
+      resolver.resolveException(request, response, null, exception);
+}
+
+@Bean
+AccessDeniedHandler delegatingAccessDeniedHandler(
+    @Qualifier("handlerExceptionResolver") HandlerExceptionResolver resolver) {
+  return (request, response, exception) ->
+      resolver.resolveException(request, response, null, exception);
+}
+```
+
+Caveats: your advice must then handle `AuthenticationException` and `AccessDeniedException` explicitly, and your catch-all `Exception` handler must not accidentally downgrade them to 500.
+
+**Reactive — share the renderer, not the dispatch path.** WebFlux has no `HandlerExceptionResolver`, and `@ControllerAdvice` exception handling lives inside the `DispatcherHandler`, which a security failure in the `WebFilter` chain never reaches. Instead, extract the body rendering into one component and call it from *both* your advice and the security beans:
+
+```java
+@Bean
+ServerAuthenticationEntryPoint problemDetailEntryPoint(ErrorBodyRenderer renderer) {
+  return (exchange, exception) -> renderer.write(exchange, HttpStatus.UNAUTHORIZED, exception);
+}
+
+@Bean
+ServerAccessDeniedHandler problemDetailAccessDeniedHandler(ErrorBodyRenderer renderer) {
+  return (exchange, exception) -> renderer.write(exchange, HttpStatus.FORBIDDEN, exception);
+}
+```
+
+Convergence happens at the renderer instead of the dispatch path — same single source of truth for the body shape.
+
+> **Why not `Mono.error(...)`?** Re-emitting the exception from the reactive handlers to let Boot's `ErrorWebExceptionHandler` render it looks tempting but is a trap: `DefaultErrorAttributes` derives the HTTP status from `ResponseStatusException` / `@ResponseStatus`, which `AuthenticationException` and `AccessDeniedException` carry neither of — **the default outcome is a 500, not 401/403**, and the `WWW-Authenticate` challenge is lost. Use the shared-renderer pattern.
+
+### Which failure takes which path
+
+| Scenario | Status | Handled by | Rendered by (when customized) |
+|---|---|---|---|
+| No token on a protected URL | 401 | `ExceptionTranslationFilter` / `ExceptionTranslationWebFilter` | entry point |
+| Invalid / expired / malformed token | 401 | Bearer-token filter | entry point |
+| Invalid token on a **`permitAll`** URL | 401 | Bearer-token filter — a present-but-bad token is always authenticated | entry point |
+| Valid token, insufficient role | 403 | `AuthorizationFilter` → exception translation | access-denied handler |
+| **Anonymous** request on a `denyAll` / blacklisted URL | 401 (not 403!) | Exception translation treats anonymous denials as authentication failures | entry point |
+| `@PreAuthorize` denial inside a handler method | 403 | Reaches your `@RestControllerAdvice` as `AccessDeniedException` | your advice (unchanged by this feature) |
+
+### Management port is not affected
+
+The management-port chain deliberately keeps the RFC 6750 defaults (status + `WWW-Authenticate`, empty body): it serves probes and scrapers that read status codes, not bodies. Custom entry points / denied handlers apply to the main port only.
 
 ## Changelog
 

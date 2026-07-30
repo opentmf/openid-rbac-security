@@ -1,6 +1,7 @@
 package org.opentmf.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.opentmf.security.util.TestImages.KEYCLOAK_IMAGE;
 
 import dasniko.testcontainers.keycloak.KeycloakContainer;
 import java.net.URI;
@@ -53,7 +54,7 @@ import org.springframework.web.client.RestTemplate;
 @TestInstance(Lifecycle.PER_CLASS)
 class ManagementServletIT {
 
-  private static final KeycloakContainer KEYCLOAK = new KeycloakContainer()
+  private static final KeycloakContainer KEYCLOAK = new KeycloakContainer(KEYCLOAK_IMAGE)
       .withRealmImportFile("realm/rehearsal.json");
 
   static {

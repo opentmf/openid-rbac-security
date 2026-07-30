@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.opentmf.security.util.TestImages.KEYCLOAK_IMAGE;
 import static org.opentmf.security.util.TokenUtil.DIFFERENT_PROVIDER_TOKEN;
 import static org.opentmf.security.util.TokenUtil.EXPIRED_READER_TOKEN;
 
@@ -21,12 +22,13 @@ class ReactiveControllerIT extends BaseReactiveIT{
 
   static {
     @SuppressWarnings("resource")
-    KeycloakContainer keycloakContainer = new KeycloakContainer().withRealmImportFile(
+    KeycloakContainer keycloakContainer = new KeycloakContainer(KEYCLOAK_IMAGE).withRealmImportFile(
             "realm/rehearsal.json");
     keycloakContainer.setPortBindings(List.of("8191:8080"));
     keycloakContainer.start();
   }
 
+  @Override
   @Test
   void testJwtService_withValidToken_returnsValidResults() {
     var token = reactiveTokenService.getToken(getTokenUri(), "write");

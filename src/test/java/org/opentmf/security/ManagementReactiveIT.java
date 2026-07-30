@@ -1,5 +1,7 @@
 package org.opentmf.security;
 
+import static org.opentmf.security.util.TestImages.KEYCLOAK_IMAGE;
+
 import dasniko.testcontainers.keycloak.KeycloakContainer;
 import java.net.URI;
 import org.junit.jupiter.api.BeforeAll;
@@ -44,7 +46,7 @@ import org.springframework.test.web.reactive.server.WebTestClient;
 @TestInstance(Lifecycle.PER_CLASS)
 class ManagementReactiveIT {
 
-  private static final KeycloakContainer KEYCLOAK = new KeycloakContainer()
+  private static final KeycloakContainer KEYCLOAK = new KeycloakContainer(KEYCLOAK_IMAGE)
       .withRealmImportFile("realm/rehearsal.json");
 
   static {

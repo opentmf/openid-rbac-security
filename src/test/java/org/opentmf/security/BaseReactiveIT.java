@@ -1,6 +1,7 @@
 package org.opentmf.security;
 
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.opentmf.security.util.TokenUtil.EXPIRED_TOKEN;
 import static org.springframework.security.test.web.reactive.server.SecurityMockServerConfigurers.springSecurity;
 
 import java.net.URI;
@@ -213,6 +214,33 @@ abstract class BaseReactiveIT extends BaseIT {
     // which we've verified works by the successful authentication above
     Assertions.assertNotNull(emailClaim != null ? emailClaim : subClaim, 
         "Either email or sub claim should exist");
+  }
+
+  @Order(200)
+  @Test
+  void testDefault401_withoutToken_returnsEmptyBodyWithBearerChallenge() {
+    get("/car/model")
+        .expectStatus().isUnauthorized()
+        .expectHeader().exists("WWW-Authenticate")
+        .expectBody().isEmpty();
+  }
+
+  @Order(210)
+  @Test
+  void testDefault401_withInvalidToken_returnsEmptyBodyWithInvalidTokenChallenge() {
+    get("/car/model", EXPIRED_TOKEN)
+        .expectStatus().isUnauthorized()
+        .expectHeader().valueMatches("WWW-Authenticate", ".*invalid_token.*")
+        .expectBody().isEmpty();
+  }
+
+  @Order(220)
+  @Test
+  void testDefault403_withInsufficientRole_returnsEmptyBody() {
+    String token = getToken("read");
+    postCar(token)
+        .expectStatus().isForbidden()
+        .expectBody().isEmpty();
   }
 
   protected URI getTokenUri() {

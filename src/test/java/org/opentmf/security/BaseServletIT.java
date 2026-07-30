@@ -1,6 +1,10 @@
 package org.opentmf.security;
 
+import static org.hamcrest.Matchers.containsString;
+import static org.opentmf.security.util.TokenUtil.EXPIRED_TOKEN;
 import static org.springframework.security.test.web.servlet.setup.SecurityMockMvcConfigurers.springSecurity;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import java.net.URI;
@@ -222,6 +226,34 @@ abstract class BaseServletIT extends BaseIT {
     // which we've verified works by the successful authentication above
     Assertions.assertNotNull(emailClaim != null ? emailClaim : subClaim, 
         "Either email or sub claim should exist");
+  }
+
+  @Order(200)
+  @Test
+  void testDefault401_withoutToken_returnsEmptyBodyWithBearerChallenge() throws Exception {
+    mockMvc.perform(getBuilder("/car/model"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(header().exists("WWW-Authenticate"))
+        .andExpect(content().string(""));
+  }
+
+  @Order(210)
+  @Test
+  void testDefault401_withInvalidToken_returnsEmptyBodyWithInvalidTokenChallenge()
+      throws Exception {
+    mockMvc.perform(getBuilder(EXPIRED_TOKEN, "/car/model"))
+        .andExpect(status().isUnauthorized())
+        .andExpect(header().string("WWW-Authenticate", containsString("invalid_token")))
+        .andExpect(content().string(""));
+  }
+
+  @Order(220)
+  @Test
+  void testDefault403_withInsufficientRole_returnsEmptyBody() throws Exception {
+    String token = getToken("read");
+    mockMvc.perform(postMercedesBuilder(token))
+        .andExpect(status().isForbidden())
+        .andExpect(content().string(""));
   }
 
   protected URI getTokenUri() {

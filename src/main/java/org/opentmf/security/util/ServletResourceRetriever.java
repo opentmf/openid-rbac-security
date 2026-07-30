@@ -1,5 +1,6 @@
 package org.opentmf.security.util;
 
+import static org.opentmf.security.util.ResourceRetrieverSupport.contents;
 import static org.springframework.http.MediaType.APPLICATION_JSON_VALUE;
 
 import com.nimbusds.jose.util.Resource;
@@ -14,7 +15,7 @@ import org.springframework.util.ResourceUtils;
  *
  * @author Gokhan Demir
  */
-public class ServletResourceRetriever extends BaseResourceRetriever implements ResourceRetriever {
+public class ServletResourceRetriever implements ResourceRetriever {
 
   @Override
   public Resource retrieveResource(java.net.URL url) {
