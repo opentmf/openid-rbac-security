@@ -324,10 +324,13 @@
             <configuration>
               <rules>
                 <requireJavaVersion>
-                  <version>17</version>
+                  <version>[17,18)</version>
+                  <message>This build requires JDK 17. Point JAVA_HOME at a JDK 17 installation
+                    before running Maven.</message>
                 </requireJavaVersion>
                 <requireMavenVersion>
-                  <version>3.9.0</version>
+                  <version>[3.9,3.10)</version>
+                  <message>This build requires Maven 3.9.x (found: ${maven.version}).</message>
                 </requireMavenVersion>
               </rules>
             </configuration>
