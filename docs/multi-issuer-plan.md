@@ -139,6 +139,6 @@ needed.
 - dnms: template `config-security.yml` gains a commented dual-issuer example;
   combined-rules §16 one-line note (after release).
 - opentmf-cadenzaflow: bump to ≥ 2.3.0 so the engine REST accepts the M2M
-  issuer + (if ever needed) Entra tokens — see its `docs/aws-entra-plan.md`.
+  issuer + (if ever needed) Entra tokens — see its `docs/entra-sso-plan.md`.
 - VFDE workshop: the exact Entra values (tenant id, registrations, app-role
   names) come from the AD-side setup this plan's README documents the shape of.
