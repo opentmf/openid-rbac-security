@@ -16,7 +16,7 @@ All notable changes to this project will be documented in this file.
 
 ### Changed
 - Upgraded to Spring Boot 4.1.0 (from 4.0.6), which brings Spring Security 7.1.0; Spring Framework stays at 7.0.8. The library imports `spring-boot-dependencies` as a BOM rather than inheriting the starter parent, so a consumer's own dependency management still wins — consumers on Boot 4.0 keep their resolved versions and are not forced to upgrade in lockstep. No API this library calls was deprecated or removed in the move.
-- Build-only and test-only tooling bumps with no effect on the published artifact: JaCoCo 0.8.15, Surefire/Failsafe 3.5.6, Enforcer 3.6.3, sonar-maven-plugin 5.7.0.6970, testcontainers-keycloak 4.3.1 (the Keycloak image the integration tests run against stays pinned at 26.6).
+- Build-only and test-only tooling bumps with no effect on the published artifact: JaCoCo 0.8.15, Surefire/Failsafe 3.5.6, Enforcer 3.6.3, sonar-maven-plugin 5.7.0.6970, central-publishing-maven-plugin 0.11.0, testcontainers-keycloak 4.3.1 (the Keycloak image the integration tests run against stays pinned at 26.6).
 - `opentmf.security.jwk-set-uri` is no longer annotated `@NotNull` on its own; the requirement moved to a cross-field rule stating that exactly one of `jwk-set-uri` or `issuers` must be configured. A configuration that declares neither still fails to boot, with a clearer message.
 - The custom 401/403 handler beans introduced in 2.2.0 continue to apply unchanged in multi-issuer mode, where token validation runs through an authentication-manager resolver rather than the `jwt()` configurer. Covered by regression tests.
 
