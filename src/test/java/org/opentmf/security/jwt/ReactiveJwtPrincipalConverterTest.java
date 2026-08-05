@@ -1,8 +1,8 @@
 package org.opentmf.security.jwt;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.Instant;
@@ -14,6 +14,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
 class ReactiveJwtPrincipalConverterTest {
@@ -277,10 +278,12 @@ class ReactiveJwtPrincipalConverterTest {
     // When
     Mono<? extends AbstractAuthenticationToken> resultMono = converter.convert(jwt);
 
-    // Then
+    // Then — the converter supplies no principal name; whether the token reports that as null
+    // or as "" is the framework's business (Spring Security 7.1 normalizes it to empty), so
+    // this asserts only what the library itself guarantees: no invented principal.
     AbstractAuthenticationToken result = resultMono.block();
     assertNotNull(result);
-    assertNull(result.getName());
+    assertFalse(StringUtils.hasText(result.getName()));
   }
 
   private Jwt createJwt(Map<String, Object> claims) {
