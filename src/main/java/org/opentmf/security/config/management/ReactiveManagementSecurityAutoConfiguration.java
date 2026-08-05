@@ -1,13 +1,8 @@
 package org.opentmf.security.config.management;
 
-import static org.opentmf.security.config.CommonConfig.authoritiesClaimName;
-import static org.opentmf.security.config.CommonConfig.principalClaimName;
-
-import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
-import org.opentmf.security.jwt.ReactiveJwtPrincipalConverter;
+import org.opentmf.security.config.ReactiveJwtSupport;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
@@ -20,8 +15,6 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.core.convert.converter.Converter;
-import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity.AuthorizeExchangeSpec;
@@ -29,20 +22,17 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.CsrfSpe
 import org.springframework.security.config.web.server.ServerHttpSecurity.FormLoginSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
-import reactor.core.publisher.Mono;
 
 /**
  * Registers a JWT-authenticated {@link SecurityWebFilterChain} into the management child
  * {@code ApplicationContext} when {@code management.server.port} differs from
- * {@code server.port}. Reuses the parent context's {@link ReactiveJwtDecoder} so JWT
- * decoding is not duplicated.
+ * {@code server.port}. Reuses the parent context's {@link ReactiveJwtSupport} so decoders,
+ * claim mapping and multi-issuer routing are identical to the main port and cannot drift.
  *
- * <p>{@link OpenTmfSecurityProperties} and {@link ReactiveJwtDecoder} are resolved from
+ * <p>{@link OpenTmfSecurityProperties} and {@link ReactiveJwtSupport} are resolved from
  * the parent (root) context via Spring's parent-first bean lookup. IntelliJ's Spring
  * plugin does not model that for {@link ManagementContextConfiguration} classes, so the
  * suppression below silences spurious "no bean found" inspection warnings on the
@@ -61,7 +51,7 @@ import reactor.core.publisher.Mono;
 public class ReactiveManagementSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties properties;
-  private final ReactiveJwtDecoder reactiveJwtDecoder;
+  private final ReactiveJwtSupport reactiveJwtSupport;
 
   @Bean
   @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -75,9 +65,7 @@ public class ReactiveManagementSecurityAutoConfiguration {
         .httpBasic(HttpBasicSpec::disable)
         .logout(LogoutSpec::disable)
         .authorizeExchange(this::applyManagementAuthorization)
-        .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
-            .jwtDecoder(reactiveJwtDecoder)
-            .jwtAuthenticationConverter(jwtAuthenticationConverter())))
+        .oauth2ResourceServer(reactiveJwtSupport::apply)
         .build();
   }
 
@@ -97,16 +85,5 @@ public class ReactiveManagementSecurityAutoConfiguration {
       case DENY -> exchanges.anyExchange().denyAll();
       case AUTHENTICATED -> exchanges.anyExchange().authenticated();
     }
-  }
-
-  private Converter<Jwt, Mono<? extends AbstractAuthenticationToken>> jwtAuthenticationConverter() {
-    var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
-        authoritiesClaimName(properties.getAuthoritiesClaim()));
-    String primaryClaim = principalClaimName(properties.getUserClaim());
-    List<String> fallbackClaims = properties.getFallbackUserClaims();
-    return new ReactiveJwtPrincipalConverter(
-        primaryClaim,
-        fallbackClaims != null ? fallbackClaims : List.of(),
-        grantedAuthoritiesConverter);
   }
 }

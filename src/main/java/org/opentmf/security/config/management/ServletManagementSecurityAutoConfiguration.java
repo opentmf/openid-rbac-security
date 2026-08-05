@@ -1,17 +1,13 @@
 package org.opentmf.security.config.management;
 
-import static org.opentmf.security.config.CommonConfig.authoritiesClaimName;
-import static org.opentmf.security.config.CommonConfig.principalClaimName;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
-import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
-import org.opentmf.security.jwt.ServletJwtPrincipalConverter;
+import org.opentmf.security.config.ServletJwtSupport;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
@@ -25,16 +21,12 @@ import org.springframework.context.annotation.Conditional;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
-import org.springframework.core.convert.converter.Converter;
-import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
-import org.springframework.security.oauth2.jwt.Jwt;
-import org.springframework.security.oauth2.jwt.JwtDecoder;
 import org.springframework.security.web.SecurityFilterChain;
 
 /**
@@ -68,7 +60,7 @@ public class ServletManagementSecurityAutoConfiguration {
   static final String MANAGEMENT_SERVER_NAMESPACE = "management";
 
   private final OpenTmfSecurityProperties properties;
-  private final JwtDecoder jwtDecoder;
+  private final ServletJwtSupport servletJwtSupport;
   private final AtomicInteger managementPort = new AtomicInteger(-1);
 
   @EventListener
@@ -90,9 +82,7 @@ public class ServletManagementSecurityAutoConfiguration {
         .httpBasic(HttpBasicConfigurer::disable)
         .logout(LogoutConfigurer::disable)
         .authorizeHttpRequests(this::applyManagementAuthorization)
-        .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> jwt
-            .decoder(jwtDecoder)
-            .jwtAuthenticationConverter(jwtAuthenticationConverter())))
+        .oauth2ResourceServer(servletJwtSupport::apply)
         .build();
   }
 
@@ -118,16 +108,5 @@ public class ServletManagementSecurityAutoConfiguration {
       case DENY -> requests.anyRequest().denyAll();
       case AUTHENTICATED -> requests.anyRequest().authenticated();
     }
-  }
-
-  private Converter<Jwt, AbstractAuthenticationToken> jwtAuthenticationConverter() {
-    var grantedAuthoritiesConverter = new GrantedAuthoritiesConverter(
-        authoritiesClaimName(properties.getAuthoritiesClaim()));
-    String primaryClaim = principalClaimName(properties.getUserClaim());
-    List<String> fallbackClaims = properties.getFallbackUserClaims();
-    return new ServletJwtPrincipalConverter(
-        primaryClaim,
-        fallbackClaims != null ? fallbackClaims : List.of(),
-        grantedAuthoritiesConverter);
   }
 }

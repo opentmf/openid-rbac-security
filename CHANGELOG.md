@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.3.0] - 2026-08-05
+
+### Added
+- **Multi-issuer resource-server support.** A service can now validate tokens from several identity providers at once — for example Entra ID for user-driven calls and Keycloak for service-to-service calls on the same endpoints — via the new `opentmf.security.issuers` list. Each entry declares its own `issuer`, `jwk-set-uri`, claim mapping and optional audience restriction. **Consumers that do not configure `issuers` see zero behavior change**: the existing `jwk-set-uri` and claim properties keep working exactly as before, including the classpath/file JWK set support, and single-issuer mode continues not to check the `iss` claim.
+- Incoming tokens are routed to the entry whose `issuer` matches their `iss` claim, and that entry's decoder validates signature, issuer, expiry and audience. A token whose issuer matches no entry — or that carries no `iss` at all — is rejected with `401 invalid_token`; there is deliberately no fallback issuer.
+- Per-issuer claim mapping normalizes each provider's token shape onto the same internal role vocabulary, so `secure-endpoints`, `whitelist`, `blacklist` and `other-endpoints` are written once and never fork per provider. An entry inherits `user-claim`, `fallback-user-claims` and `authorities-claim` from the top-level properties unless it declares its own, so the common vocabulary is configured once and only the deviating issuer overrides it.
+- Optional per-issuer `audiences`. When set, a token is rejected unless its `aud` claim contains one of the listed values. Recommended for providers that mint tokens for many applications from a single tenant (Entra in particular), where issuer validation alone would accept a token issued to a different application of the same tenant. Empty by default, so enabling it is an explicit decision and requires no change in calling services.
+- The `JwtDecoder` / `ReactiveJwtDecoder` bean routes by issuer in multi-issuer mode, so `JwtService` and any consumer decoding tokens outside the filter chain keep working across every trusted issuer rather than being pinned to one.
+- The management-port chain trusts the same set of issuers as the main port on both stacks, since a scraper's JWT may legitimately come from either provider.
+- Boot-time validation of the trust declaration: configuring both `jwk-set-uri` and `issuers`, or neither, fails startup with a named error, as do a duplicate `issuer` value (routing would be ambiguous) or a duplicate `name`. Each entry requires `issuer` and `jwk-set-uri`.
+- README gained a "Multiple trusted issuers" section covering the dual-issuer configuration, the normalization principle, token routing, audience-validation rollout, and the Entra pitfalls that bite in the field (tenant- and version-specific issuer values, App Roles over truncating group claims, `oid` as the stable principal).
+
+### Changed
+- `opentmf.security.jwk-set-uri` is no longer annotated `@NotNull` on its own; the requirement moved to a cross-field rule stating that exactly one of `jwk-set-uri` or `issuers` must be configured. A configuration that declares neither still fails to boot, with a clearer message.
+- The custom 401/403 handler beans introduced in 2.2.0 continue to apply unchanged in multi-issuer mode, where token validation runs through an authentication-manager resolver rather than the `jwt()` configurer. Covered by regression tests.
+
 ## [2.2.0] - 2026-07-30
 
 ### Added

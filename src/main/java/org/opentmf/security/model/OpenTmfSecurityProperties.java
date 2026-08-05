@@ -1,12 +1,15 @@
 package org.opentmf.security.model;
 
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.AssertTrue;
 import jakarta.validation.constraints.NotEmpty;
-import jakarta.validation.constraints.NotNull;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import lombok.Getter;
 import lombok.Setter;
+import org.springframework.util.StringUtils;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.core.io.Resource;
 import org.springframework.validation.annotation.Validated;
@@ -43,20 +46,44 @@ public class OpenTmfSecurityProperties {
   private List<@NotEmpty String> whitelist = new ArrayList<>();
 
   /**
-   * Must be a valid Resource pointer.
+   * Single-issuer mode: where the signing keys of the one trusted issuer are fetched from.
+   * Mutually exclusive with {@link #getIssuers()} — configure exactly one of the two.
    * <p><strong>Examples:</strong></p>
    * <ul>
    * <li>classpath:local-jwk-set.json</li>
    * <li>http://localhost:8092/realms/rehearsal-realm/protocol/openid-connect/certs</li>
    * <li>file:///path/to/jwk-set.json</li>
    * </ul>
+   *
+   * <p>In this mode the {@code iss} claim is not checked, matching the behavior of every
+   * release before 2.3.0. Use {@link #getIssuers()} to pin issuers explicitly.
+   *
    * @see Resource
    * @see Resource#getURL()
    */
-  private @NotNull Resource jwkSetUri;
+  private Resource jwkSetUri;
+
+  /**
+   * Multi-issuer mode: the trusted issuers, each with its own signing keys and claim mapping.
+   * Mutually exclusive with {@link #getJwkSetUri()}. Empty by default, which selects
+   * single-issuer mode.
+   *
+   * <p>A token is routed to the entry whose {@link IssuerProperties#getIssuer()} equals its
+   * {@code iss} claim; a token whose issuer matches no entry — or that carries no {@code iss}
+   * at all — is rejected with {@code 401 invalid_token}. There is deliberately no fallback
+   * issuer.
+   *
+   * <p>{@link #getUserClaim()}, {@link #getFallbackUserClaims()} and
+   * {@link #getAuthoritiesClaim()} remain valid alongside this list: they act as the defaults
+   * that entries inherit when they do not set their own, so the common vocabulary is
+   * configured once and only the deviating issuer overrides it.
+   */
+  private List<@Valid IssuerProperties> issuers = new ArrayList<>();
 
   /**
    * The claim in the JWT to consider as the user's name. Defaults to "sub" if not specified.
+   * In multi-issuer mode this is the default inherited by entries that do not set their own
+   * {@link IssuerProperties#getUserClaim()}.
    */
   private String userClaim;
 
@@ -93,6 +120,44 @@ public class OpenTmfSecurityProperties {
    * {@code management.server.port} differs from {@code server.port}.
    */
   private @Valid Management management = new Management();
+
+  /**
+   * Guards the two mutually exclusive ways of declaring trust. Neither configured means the
+   * service would accept no token at all; both configured is ambiguous about which issuer
+   * governs. Either way the deployer must choose, so boot fails rather than guessing.
+   */
+  @AssertTrue(message = "Configure exactly one of opentmf.security.jwk-set-uri (single issuer)"
+      + " or opentmf.security.issuers (multiple issuers) — currently neither or both are set.")
+  public boolean isTrustDeclaredExactlyOnce() {
+    return (jwkSetUri != null) != !issuers.isEmpty();
+  }
+
+  /**
+   * A repeated {@code iss} value would make issuer-to-entry routing ambiguous — the second
+   * entry's keys and claim mapping would silently never be used.
+   */
+  @AssertTrue(message = "Each opentmf.security.issuers[].issuer must be unique;"
+      + " duplicate issuer values cannot be routed unambiguously.")
+  public boolean isIssuerUnique() {
+    return isDistinct(issuers.stream().map(IssuerProperties::getIssuer).toList());
+  }
+
+  /**
+   * Names only label log output, but duplicates there make those logs unreadable precisely
+   * when someone is debugging which issuer accepted a token.
+   */
+  @AssertTrue(message = "Each opentmf.security.issuers[].name must be unique when set.")
+  public boolean isIssuerNameUnique() {
+    return isDistinct(issuers.stream()
+        .map(IssuerProperties::getName)
+        .filter(StringUtils::hasText)
+        .toList());
+  }
+
+  private static boolean isDistinct(List<String> values) {
+    Set<String> seen = new HashSet<>();
+    return values.stream().allMatch(seen::add);
+  }
 
   /**
    * Security configuration for the separate management connector. Mirrors the main-port

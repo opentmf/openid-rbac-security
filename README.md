@@ -90,7 +90,8 @@ All properties live under the `opentmf.security` prefix.
 
 | Property | Default | Description |
 |---|---|---|
-| `jwk-set-uri` | *(required)* | URL or resource path to the JWK Set (e.g. Keycloak certs endpoint, or `classpath:jwk-set.json`). |
+| `jwk-set-uri` | *(required unless `issuers` is set)* | URL or resource path to the JWK Set (e.g. Keycloak certs endpoint, or `classpath:jwk-set.json`). Single-issuer mode; mutually exclusive with `issuers`. |
+| `issuers` | *(empty)* | List of trusted issuers for services that accept tokens from more than one identity provider. See [Multiple trusted issuers](#multiple-trusted-issuers). Mutually exclusive with `jwk-set-uri`. |
 | `user-claim` | `sub` | JWT claim to use as the principal (user identifier). |
 | `fallback-user-claims` | *(empty)* | Ordered list of fallback claims when `user-claim` is absent. Useful for `client_credentials` tokens. |
 | `authorities-claim` | `roles` | JWT claim containing the user's roles/authorities. |
@@ -114,6 +115,67 @@ opentmf:
     user-claim: email
     fallback-user-claims: client_id, azp, sub
 ```
+
+## Multiple trusted issuers
+
+A service sometimes has to accept tokens from two identity providers at once — for example user-driven calls carrying an Entra ID token while service-to-service calls carry a Keycloak token. Since 2.3.0, `opentmf.security.issuers` declares each trusted issuer with its own signing keys and its own claim mapping:
+
+```yaml
+opentmf:
+  security:
+    # user-claim / fallback-user-claims / authorities-claim stay valid here as the
+    # defaults every entry inherits unless it declares its own.
+    authorities-claim: groups
+    user-claim: sub
+    fallback-user-claims: client_id, azp
+
+    issuers:
+      - name: entra                     # label for logs only
+        issuer: https://login.microsoftonline.com/<tenantId>/v2.0
+        jwk-set-uri: https://login.microsoftonline.com/<tenantId>/discovery/v2.0/keys
+        authorities-claim: roles        # Entra app roles, named after the internal vocabulary
+        user-claim: oid                 # stable object id
+        fallback-user-claims: preferred_username, sub
+        audiences: [<application-client-id>]
+      - name: keycloak
+        issuer: https://keycloak.internal/realms/dnms
+        jwk-set-uri: https://keycloak.internal/realms/dnms/protocol/openid-connect/certs
+        # inherits authorities-claim: groups and user-claim: sub from above
+
+    # Endpoint rules are written once and never fork per provider:
+    secure-endpoints:
+      - method: POST
+        path: /product
+        roles: [write]
+```
+
+`jwk-set-uri` and `issuers` are mutually exclusive — configure exactly one, or the application fails to start. Everything documented elsewhere in this README (endpoint rules, management-port security, 401/403 customization) behaves identically in both modes.
+
+### Normalization: authorization never forks per provider
+
+Each entry's claim mapping translates its provider's token shape into the **same internal role vocabulary**, so `secure-endpoints` and friends are written once and stay provider-blind. In the example above an Entra token's `roles` claim and a Keycloak token's `groups` claim both end up as the authorities `read`/`write`, and a rule demanding `write` is satisfied by either. Resist the temptation to encode provider names into endpoint rules; if a provider's roles do not match the internal vocabulary, fix that in its claim mapping (or in the provider's role names), not in the ACLs.
+
+### How a token is routed
+
+A token is matched to the entry whose `issuer` equals its `iss` claim, and that entry's decoder then validates the signature, the issuer, the expiry and — when configured — the audience. A token whose `iss` matches no entry, or that carries no `iss` at all, is rejected with `401 invalid_token`. There is deliberately no fallback issuer.
+
+The `JwtDecoder` / `ReactiveJwtDecoder` bean (and therefore `JwtService`) routes the same way, so code decoding tokens outside the filter chain works across every trusted issuer.
+
+### Audience validation
+
+`audiences` is optional and empty by default. When set, a token is rejected unless its `aud` claim contains one of the listed values.
+
+Enabling it is strongly recommended for a provider that mints tokens for many applications from one tenant — Entra above all. Without it, a token issued to a *completely different application* of the same tenant still satisfies the issuer check and is accepted. With it, only tokens actually meant for this service pass.
+
+Roll it out by verifying first: decode a real token from the target environment, read its `aud`, and configure exactly that. A wrong value rejects every request from that issuer. Note that audience is normally a consequence of how the client requested the token (for Entra, the scope `api://<client-id>/.default` determines it), so enabling validation here requires no change in the calling services as long as they already request tokens for this service.
+
+### Entra ID notes
+
+These are the details that bite in practice:
+
+- **The issuer is tenant-specific and version-specific.** v2 emits `https://login.microsoftonline.com/{tenantId}/v2.0`, but an app registration left on token version 1 emits `https://sts.windows.net/{tenantId}/` instead. Pin v2 (`accessTokenAcceptedVersion: 2` in the app manifest) and copy the `iss` from a real decoded token rather than assuming.
+- **Prefer App Roles over group claims.** Group claims truncate into a pointer claim past roughly 200 memberships, at which point authorization silently degrades for exactly the most privileged users. App roles always arrive inline in `roles`, and naming them after the internal vocabulary (`read`, `write`, `admin`) makes the mapping an identity.
+- **`oid` is the stable principal**, `preferred_username` the readable one; `user-claim: oid` with `preferred_username` as a fallback gives stability without losing legibility in logs.
 
 ## Management-port security
 
