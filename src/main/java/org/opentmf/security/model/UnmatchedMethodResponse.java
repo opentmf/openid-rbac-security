@@ -32,7 +32,7 @@ public enum UnmatchedMethodResponse {
 
   /**
    * Answer every denial the same way, with {@code 403 Forbidden} and no {@code Allow}
-   * header. Restores the behavior of releases before 2.4.0. Choose this to keep the set of
+   * header. Restores the behavior of releases before 3.0.0. Choose this to keep the set of
    * methods an application implements from being disclosed, or when a consumer relies on
    * {@code 403} for requests that use an unsupported method.
    */

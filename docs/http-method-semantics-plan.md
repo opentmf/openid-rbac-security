@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | **Status** | Implemented on `fix/http-method-semantics`; §14 records what implementation changed |
-| **Target** | **2.4.0** (Gökhan's call; §11 records the case for a major and why it was not taken) |
+| **Target** | **3.0.0** (Gökhan's call; §11 records the case for a major and why it was not taken) |
 | **Written** | 2026-08-31, against released 2.3.0 |
 | **Verified against** | Spring Security **7.1.0**, Spring Framework **7.0.8** (via Spring Boot 4.1.0) |
 
@@ -663,7 +663,7 @@ New enum: `org.opentmf.security.model.UnmatchedMethodResponse` — `METHOD_NOT_A
 - **Enum, not boolean** — consistent with `OtherEndpoints`, and leaves room for a third mode.
 - **Symmetric name and symmetric default across both sections.** The two sections diverge on
   `other-endpoints` for a stated reason; there is no such reason here, so they match.
-- **`DENY` remains** as the opt-out for a deployment that wants the pre-2.4.0 uniform 403 —
+- **`DENY` remains** as the opt-out for a deployment that wants the pre-3.0.0 uniform 403 —
   a compliance posture that declines to advertise its method surface, or a consumer with 403
   assertions it cannot change quickly.
 
@@ -817,8 +817,8 @@ marked accepted without Gökhan's explicit per-finding approval.
 
 ## 11. Versioning and CHANGELOG
 
-**Released as `2.4.0`** (Gökhan, 2026-08-31). `pom.xml` moves from `2.3.1-SNAPSHOT` to
-`2.4.0-SNAPSHOT`, and the CHANGELOG gets a new `## [2.4.0] - YYYY-MM-DD` section above
+**Released as `3.0.0`** (Gökhan, 2026-08-31). `pom.xml` moves from `2.3.1-SNAPSHOT` to
+`3.0.0-SNAPSHOT`, and the CHANGELOG gets a new `## [3.0.0] - YYYY-MM-DD` section above
 `## [2.3.0]`.
 
 The case for calling it a major was put and not taken, and is recorded so nobody re-opens it:
@@ -972,7 +972,7 @@ rather than assumed. `StackIsolationTest` answers it three ways:
 3. **The one configuration that cannot work is unchanged by this release.** A servlet app with
    no Spring MVC at all (Jersey) fails — but on
    `NoSuchBeanDefinitionException: CorsConfigurationSource`, raised by the `.cors(withDefaults())`
-   call that has been in the chain since long before 2.4.0. `CorsConfigurer` needs either a
+   call that has been in the chain since long before 3.0.0. `CorsConfigurer` needs either a
    `CorsConfigurationSource` bean or the `mvcHandlerMappingIntrospector`. So Spring MVC was
    already required on the servlet path, and the new webmvc reference adds no constraint that
    was not there already. Verified by probe, not reasoned.
@@ -1048,7 +1048,7 @@ Not something this plan introduced, but something it exposes. Under the previous
 type, Boot bound `method: get` through `HttpMethod.valueOf`, which is **case-preserving** —
 `valueOf("get")` returns `new HttpMethod("get")`, not the `GET` constant — and both stacks'
 matchers compare the verb by exact string. A lowercase rule therefore **never matched**: the path
-fell through to `other-endpoints` and was denied. Enum binding is case-insensitive, so on 2.4.0
+fell through to `other-endpoints` and was denied. Enum binding is case-insensitive, so on 3.0.0
 the same line binds to `GET` and the rule takes effect: an `allowed-endpoints` entry becomes
 anonymous `permitAll`, a `secure-endpoints` entry starts granting.
 
@@ -1251,3 +1251,54 @@ None of these block the merge; each is a call the review deliberately leaves to 
    `TestIssuer`, the JWT converter/util tests, both MultiIssuer ITs) and 1× `S2143`
    (`JwtServiceImpl` still on `java.util.Date`). Mechanical to clear, but they touch files this
    PR otherwise does not.
+
+## 20. Decisions taken (maintainer, 2026-08-31)
+
+Gökhan answered every item in §19; this section records the calls and what changed for them.
+
+**1. The release is 3.0.0, and `unmatched-method-response` defaults to `METHOD_NOT_ALLOWED`.**
+The disclosing default stays, and the version honesty problem is solved from the other side: the
+release ships as a major. §11's case for a major version wins after all; version strings
+throughout this document, the CHANGELOG, the README and the javadoc now read 3.0.0.
+
+**2. Startup detection for previously-dead lowercase rules — added, as fail-fast.** Not as the
+suggested converter, though — implementing it surfaced that a rejecting
+`@ConfigurationPropertiesBinding` converter does not fail the bind: Boot falls through to the
+next conversion service, whose lenient enum support accepts the value, and the rejection
+evaporates (the wiring test caught this). Instead `EndpointMethodCaseGuard` (registered by the
+stack-neutral `AccessRuleBindingAutoConfiguration`) reads the raw rule strings straight from the
+`Environment` at startup — across every relaxed spelling, on both sections — and fails with a
+message explaining that the rule was dead before 3.0.0 and must be reviewed before it is allowed
+to come alive. Fail-fast rather than `WARN`: a log line is exactly the "nothing warns" problem,
+and a major release is the moment strictness is cheapest. `EndpointMethodBindingTest` pins the
+guard directly (both sections, upper-case pass-through) and a context-runner test pins the
+auto-configuration actually wiring it into a real application.
+
+**3. The event-loop warm-up — added.** Both resolvers expose `warmUp()`, and each of the four
+configurations primes its resolver off the request path: the main-context chains on
+`ApplicationReadyEvent`, the reactive management chain on its child context's own
+`WebServerInitializedEvent` (the child never sees the main context's ready event), and the
+servlet management chain on `ApplicationReadyEvent`, which fires after the child has started. A
+warm-up failure is logged at debug and the first denial retries — behaviourally identical to not
+having warmed up.
+
+**4. The two residuals — engineered around.** The resolvers no longer snapshot
+`RequestMappingInfo`s: the handler-mapping *beans* are still looked up once, lazily, but their
+mappings are read live on every resolution, so runtime-registered or -removed mappings
+(`registerMapping`, refreshed scopes) are answered for. That also dissolves the wrong-helper
+residual: the legacy Ant lookup path is now prepared per mapping with that mapping's own
+`UrlPathHelper`. Reading live surfaced a fact worth recording: `getHandlerMethods()` returns an
+unordered view whose iteration order is salted per JVM run — and Spring's own registry iteration
+is just as salted, so "registration order" was never actually reproducible from outside. The
+determinism the `Allow` header needs is therefore imposed in one place instead:
+`SupportedMethods` canonicalises `declared` into `HttpMethod.values()` order (GET, HEAD, POST,
+PUT, PATCH, DELETE, OPTIONS) in its constructor, which every derived header inherits, run after
+run, on both stacks.
+
+**5. Zero Sonar — done.** The 17 pre-existing INFO findings are cleared: the test fixtures that
+build JWTs for in-process converters use a fixed `Instant` (nothing there validates real
+expiry); `TestIssuer` names its clock once (`Clock.systemUTC()` — its tokens are validated by
+real decoders against wall-clock time, so the clock must be real) and the expiry-relative tests
+mint through `TestIssuer.now()`; and `JwtServiceImpl` no longer touches `java.util.Date` — the
+one Nimbus `Date` return value is converted to `Instant` at the call site. The quality gate and
+the issue list are both clean: zero open findings on the project, of any age.

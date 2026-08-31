@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
 import java.time.Instant;
 import java.util.Date;
 import java.util.function.Consumer;
@@ -33,6 +34,21 @@ import lombok.Getter;
 public final class TestIssuer {
 
   private static final Path JWK_SET_DIR = Path.of("target", "test-issuers");
+
+  /**
+   * The one clock the minted claims read. These tokens are validated by real decoders against
+   * wall-clock time, so — unlike a fixture nothing re-validates — this clock genuinely cannot
+   * be fixed: a frozen instant would make every minted token invalid or eternally fresh in the
+   * eyes of the decoder under test. It is named once here rather than reached for via bare
+   * {@code Instant.now()} at every call site.
+   */
+  @SuppressWarnings("java:S8692")
+  private static final Clock CLOCK = Clock.systemUTC();
+
+  /** The current instant on the issuer's clock — also for tests minting relative expiries. */
+  public static Instant now() {
+    return Instant.now(CLOCK);
+  }
 
   /** The {@code iss} value tokens from this issuer carry. */
   @Getter
@@ -80,8 +96,8 @@ public final class TestIssuer {
     JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
         .issuer(issuer)
         .subject("subject-of-" + issuer)
-        .issueTime(Date.from(Instant.now()))
-        .expirationTime(Date.from(Instant.now().plusSeconds(3600)));
+        .issueTime(Date.from(now()))
+        .expirationTime(Date.from(now().plusSeconds(3600)));
     customizer.accept(claims);
     return sign(claims.build());
   }
@@ -94,8 +110,8 @@ public final class TestIssuer {
   public String mintWithIssuer(String otherIssuer, Consumer<JWTClaimsSet.Builder> customizer) {
     JWTClaimsSet.Builder claims = new JWTClaimsSet.Builder()
         .subject("subject-of-" + otherIssuer)
-        .issueTime(Date.from(Instant.now()))
-        .expirationTime(Date.from(Instant.now().plusSeconds(3600)));
+        .issueTime(Date.from(now()))
+        .expirationTime(Date.from(now().plusSeconds(3600)));
     if (otherIssuer != null) {
       claims.issuer(otherIssuer);
     }

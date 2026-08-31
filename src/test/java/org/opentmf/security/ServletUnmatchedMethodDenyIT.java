@@ -26,7 +26,7 @@ import org.springframework.web.context.WebApplicationContext;
  * Two things at once, both needing {@code unmatched-method-response: DENY}.
  *
  * <p>First, the opt-out: with it set, every denial answers {@code 403} again, exactly as
- * releases before 2.4.0 did.
+ * releases before 3.0.0 did.
  *
  * <p>Second, and more valuable, the cross-check that keeps this feature honest. Here
  * {@code /protectedButNotConfigured} is whitelisted, so {@code PUT} against it is never denied

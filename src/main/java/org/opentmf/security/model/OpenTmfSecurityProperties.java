@@ -121,7 +121,7 @@ public class OpenTmfSecurityProperties {
    * {@link UnmatchedMethodResponse#METHOD_NOT_ALLOWED} — the same {@code 405} with an
    * {@code Allow} header that Spring itself would return had the request reached the
    * dispatcher. Set to {@link UnmatchedMethodResponse#DENY} to answer every denial with
-   * {@code 403}, as releases before 2.4.0 did.
+   * {@code 403}, as releases before 3.0.0 did.
    */
   private UnmatchedMethodResponse unmatchedMethodResponse =
       UnmatchedMethodResponse.METHOD_NOT_ALLOWED;

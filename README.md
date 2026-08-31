@@ -100,7 +100,7 @@ All properties live under the `opentmf.security` prefix.
 | `whitelist` | *(empty)* | List of path patterns that bypass security for all HTTP methods. |
 | `blacklist` | *(empty)* | List of path patterns denied for all HTTP methods. |
 | `other-endpoints` | `deny` | Catch-all policy for unmatched requests: `allow` (permit anonymously), `deny` (reject — historical default, preserves backward compatibility), `authenticated` (require any valid JWT). |
-| `unmatched-method-response` | `method-not-allowed` | How to answer a denied request whose path the application serves but not with that HTTP method: `method-not-allowed` (405 with an `Allow` header) or `deny` (403, as before 2.4.0). See [HTTP method semantics](#http-method-semantics). |
+| `unmatched-method-response` | `method-not-allowed` | How to answer a denied request whose path the application serves but not with that HTTP method: `method-not-allowed` (405 with an `Allow` header) or `deny` (403, as before 3.0.0). See [HTTP method semantics](#http-method-semantics). |
 
 ### Nested claims
 
@@ -382,7 +382,7 @@ opentmf:
 ```
 
 Spring MVC and WebFlux both serve a `HEAD` request from the handler mapped to `GET`, so before
-2.4.0 the security chain refused requests the framework was perfectly willing to answer — which
+3.0.0 the security chain refused requests the framework was perfectly willing to answer — which
 showed up as 403s from monitoring agents, reverse proxies and health checkers. This is not
 optional and there is no property to turn it off.
 
@@ -394,11 +394,13 @@ optional and there is no property to turn it off.
 > role-restricted management `GET` rule tightens `HEAD` there by default. Give the probe the
 > role, or `whitelist` the path.
 
-Method values are matched case-insensitively when binding, so `get` and `GET` mean the same
-thing. **Before 2.4.0 they did not:** the value bound through `HttpMethod.valueOf`, which
-preserves case, and the request matchers compare verbs by exact string — so a lowercase rule
-silently never matched and its path fell through to `other-endpoints`. If you are upgrading,
-check your rules for lowercase method values; one that never worked will start working.
+Method values must be written **upper-case**; a lowercase or mixed-case value fails at startup
+with a message naming the entry. This strictness exists for upgraders: before 3.0.0 the value
+bound through `HttpMethod.valueOf`, which preserves case, and the request matchers compare verbs
+by exact string — so a lowercase rule silently never matched and its path fell through to
+`other-endpoints`. Boot's relaxed enum binding would have brought such a dead rule to life on
+upgrade with no warning (an `allowed-endpoints` entry becoming anonymous `permitAll`), so the
+library refuses to guess: fix the case after reviewing that the rule is actually intended.
 
 For the same reason `method` accepts only **`GET`, `POST`, `PUT`, `PATCH`, `DELETE`**. `HEAD` is
 implied by `GET`; allowing it to be named separately would let a configuration declare different
@@ -423,7 +425,7 @@ the resource genuinely supports.
 and the access rules withhold it, that is an authorization answer and it is left alone.
 Relabelling it `405` would tell the caller the endpoint does not exist when it does.
 
-Set `unmatched-method-response: deny` to answer every denial with `403` as releases before 2.4.0
+Set `unmatched-method-response: deny` to answer every denial with `403` as releases before 3.0.0
 did — for a deployment that would rather not disclose which methods it implements, or a consumer
 whose clients depend on the old status.
 
@@ -432,9 +434,9 @@ Details worth knowing:
 - **Never without a token.** An anonymous request keeps its `401`. The method surface is only
   ever disclosed to a caller who already authenticated, and who can already read the OAS.
 - **`Allow` describes the resource, not the caller.** It is not filtered by the caller's roles,
-  which is what RFC 9110 specifies. Its methods appear in the order Spring's own responses would
-  use — registration order, `HEAD` right after `GET` — so the denied answer is byte-identical to
-  the allowed-through one.
+  which is what RFC 9110 specifies. Its methods appear in a fixed canonical order — `GET, HEAD,
+  POST, PUT, PATCH, DELETE, OPTIONS` — deterministic run after run and identical on both stacks,
+  so contract tests can compare the header exactly.
 - **Any authenticated caller, not only bearer.** The decision sits on the exception-translation
   path, so it applies however the request authenticated — an application that adds its own
   pre-authentication mechanism beside this library gets the same answers. Without a

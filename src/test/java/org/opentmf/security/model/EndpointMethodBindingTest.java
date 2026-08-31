@@ -1,23 +1,40 @@
 package org.opentmf.security.model;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import java.util.Map;
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
+import org.opentmf.security.config.AccessRuleBindingAutoConfiguration;
+import org.opentmf.security.config.EndpointMethodCaseGuard;
+import org.opentmf.security.config.ServletJwtAutoConfiguration;
+import org.opentmf.security.config.ServletSecurityAutoConfiguration;
+import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.context.properties.bind.BindException;
 import org.springframework.boot.context.properties.bind.Bindable;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.boot.context.properties.source.MapConfigurationPropertySource;
+import org.springframework.boot.test.context.runner.WebApplicationContextRunner;
+import org.springframework.boot.webmvc.autoconfigure.WebMvcAutoConfiguration;
 import org.springframework.http.HttpMethod;
+import org.springframework.mock.env.MockEnvironment;
 
 /**
  * The access-rule method is deliberately narrower than Spring's {@code HttpMethod}. A deployment
  * that names a verb outside the five must fail to start rather than bind to something that
  * quietly never applies — which is exactly what a separate {@code HEAD} rule used to do, since
  * the {@code GET} rule registered ahead of it always matched first.
+ *
+ * <p>Case is held to the same standard: before 3.0.0 a non-upper-case value never matched any
+ * request (it bound through the case-preserving {@code HttpMethod.valueOf} and the matchers
+ * compare exact strings), so the rule was dead. Relaxed enum binding would silently activate it
+ * on upgrade; {@link EndpointMethodCaseGuard} fails startup instead — as a check over the raw
+ * configuration, because a rejecting {@code @ConfigurationPropertiesBinding} converter does not
+ * fail the bind: Boot falls through to the next conversion service, which accepts leniently.
  *
  * @author Gokhan Demir
  */
@@ -39,19 +56,67 @@ class EndpointMethodBindingTest {
         .hasMessageContaining("opentmf.security.endpoint");
   }
 
-  /**
-   * Enum binding is lenient, so a lowercase value now works — and that is a behaviour change
-   * worth pinning. Under the previous {@code HttpMethod} type, Boot bound through
-   * {@code HttpMethod.valueOf}, which is case-preserving: {@code "get"} produced
-   * {@code new HttpMethod("get")}, and both stacks' matchers compare the verb by exact string,
-   * so the rule never matched and the path fell through to the catch-all. A lowercase rule was
-   * therefore dead — and becomes live on upgrade.
-   */
   @ParameterizedTest
-  @ValueSource(strings = {"get", "Get", "GET"})
-  void aLowercaseMethod_bindsWhereItPreviouslyProducedADeadRule(String method) {
-    assertThat(bind(method).getMethod()).isEqualTo(EndpointMethod.GET);
-    assertThat(HttpMethod.valueOf(method).name()).isEqualTo(method);
+  @ValueSource(strings = {"get", "Get", "gEt"})
+  void theGuard_rejectsANonUpperCaseMethod(String method) {
+    MockEnvironment environment = new MockEnvironment()
+        .withProperty("opentmf.security.allowed-endpoints[0].method", method)
+        .withProperty("opentmf.security.allowed-endpoints[0].path", "/internal");
+    EndpointMethodCaseGuard guard = new EndpointMethodCaseGuard(environment);
+
+    assertThatThrownBy(guard::afterPropertiesSet)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("must be written upper-case")
+        .hasMessageContaining("allowed-endpoints[0]");
+  }
+
+  @Test
+  void theGuard_alsoWatchesTheManagementSection() {
+    MockEnvironment environment = new MockEnvironment()
+        .withProperty("opentmf.security.management.secure-endpoints[0].method", "post")
+        .withProperty("opentmf.security.management.secure-endpoints[0].path", "/loggers");
+    EndpointMethodCaseGuard guard = new EndpointMethodCaseGuard(environment);
+
+    assertThatThrownBy(guard::afterPropertiesSet)
+        .isInstanceOf(IllegalStateException.class)
+        .hasMessageContaining("management.secure-endpoints[0]");
+  }
+
+  @Test
+  void theGuard_acceptsUpperCaseRulesAndSilence() {
+    MockEnvironment environment = new MockEnvironment()
+        .withProperty("opentmf.security.secure-endpoints[0].method", "DELETE")
+        .withProperty("opentmf.security.secure-endpoints[0].path", "/car")
+        .withProperty("opentmf.security.secure-endpoints[0].roles", "admin");
+
+    assertThatCode(() -> new EndpointMethodCaseGuard(environment).afterPropertiesSet())
+        .doesNotThrowAnyException();
+    assertThatCode(() -> new EndpointMethodCaseGuard(new MockEnvironment()).afterPropertiesSet())
+        .doesNotThrowAnyException();
+  }
+
+  /**
+   * The guard only protects what it is wired into: this pins the auto-configuration actually
+   * registering it, so a lowercase rule stops a real application.
+   */
+  @Test
+  void theAutoConfiguration_rejectsALowercaseRuleAtStartup() {
+    new WebApplicationContextRunner()
+        .withConfiguration(AutoConfigurations.of(
+            AccessRuleBindingAutoConfiguration.class,
+            WebMvcAutoConfiguration.class,
+            ServletJwtAutoConfiguration.class,
+            ServletSecurityAutoConfiguration.class))
+        .withPropertyValues(
+            "opentmf.security.jwk-set-uri=classpath:jwk-set.json",
+            "opentmf.security.allowed-endpoints[0].method=get",
+            "opentmf.security.allowed-endpoints[0].path=/internal")
+        .run(context -> {
+          assertThat(context).hasFailed();
+          assertThat(context.getStartupFailure())
+              .rootCause()
+              .hasMessageContaining("must be written upper-case");
+        });
   }
 
   @ParameterizedTest

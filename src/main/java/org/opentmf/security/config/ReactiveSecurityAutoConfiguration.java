@@ -3,6 +3,7 @@ package org.opentmf.security.config;
 import static org.opentmf.security.config.UniqueBeanResolver.resolveUnique;
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
@@ -12,9 +13,11 @@ import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
@@ -53,6 +56,24 @@ public class ReactiveSecurityAutoConfiguration {
   private final ObjectProvider<ServerAuthenticationEntryPoint> authenticationEntryPoints;
   private final ObjectProvider<ServerAccessDeniedHandler> accessDeniedHandlers;
   private final ApplicationContext applicationContext;
+
+  /** The chain's resolver, kept so {@link #warmUpSupportedMethods()} can prime it at startup. */
+  private final AtomicReference<ReactiveSupportedMethodsResolver> methodsResolver =
+      new AtomicReference<>();
+
+  /**
+   * Takes the resolver's lazy handler-mapping lookup off the first denial's back — which on
+   * this stack would land on a Netty event-loop thread — once the application, and with it
+   * every handler mapping, is ready. A failure here is harmless: the lookup is simply retried
+   * on the first denial.
+   */
+  @EventListener(ApplicationReadyEvent.class)
+  void warmUpSupportedMethods() {
+    ReactiveSupportedMethodsResolver resolver = methodsResolver.get();
+    if (resolver != null) {
+      resolver.warmUp();
+    }
+  }
 
   @Bean
   SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
@@ -94,9 +115,10 @@ public class ReactiveSecurityAutoConfiguration {
       ServerAccessDeniedHandler delegate = (consumerHandler != null)
           ? consumerHandler
           : new BearerTokenServerAccessDeniedHandler();
-      this.global = new MethodNotAllowedServerAccessDeniedHandler(
-          delegate,
-          new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings));
+      var resolver =
+          new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings);
+      methodsResolver.set(resolver);
+      this.global = new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver);
     }
   }
 

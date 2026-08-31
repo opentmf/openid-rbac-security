@@ -2,7 +2,6 @@ package org.opentmf.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.time.Instant;
 import java.util.Date;
 import java.util.List;
 import org.junit.jupiter.api.BeforeAll;
@@ -124,7 +123,7 @@ class ReactiveMultiIssuerIT {
   void expiredToken_isRejectedPerIssuer() {
     String token = ALPHA.mint(claims -> claims
         .claim("roles", List.of("write"))
-        .expirationTime(Date.from(Instant.now().minusSeconds(60))));
+        .expirationTime(Date.from(TestIssuer.now().minusSeconds(60))));
 
     getCar(token).expectStatus().isUnauthorized();
   }

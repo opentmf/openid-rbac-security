@@ -21,6 +21,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
+import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
@@ -132,9 +133,28 @@ public class ServletManagementSecurityAutoConfiguration {
   private void configureDeniedHandler(ExceptionHandlingConfigurer<HttpSecurity> handling) {
     if (properties.getManagement().getUnmatchedMethodResponse()
         == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      var resolver = new ServletSupportedMethodsResolver(this::managementHandlerMappings);
+      methodsResolver.set(resolver);
       handling.accessDeniedHandler(new MethodNotAllowedAccessDeniedHandler(
-          new BearerTokenAccessDeniedHandler(),
-          new ServletSupportedMethodsResolver(this::managementHandlerMappings)));
+          new BearerTokenAccessDeniedHandler(), resolver));
+    }
+  }
+
+  /** The chain's resolver, kept so {@link #warmUpSupportedMethods()} can prime it at startup. */
+  private final AtomicReference<ServletSupportedMethodsResolver> methodsResolver =
+      new AtomicReference<>();
+
+  /**
+   * Takes the resolver's lazy handler-mapping lookup off the first denial's back.
+   * {@code ApplicationReadyEvent} fires after the management child context has started, so the
+   * lookup normally succeeds here; if the child is somehow not up yet, the failure is logged at
+   * debug and the first denial retries.
+   */
+  @EventListener(ApplicationReadyEvent.class)
+  void warmUpSupportedMethods() {
+    ServletSupportedMethodsResolver resolver = methodsResolver.get();
+    if (resolver != null) {
+      resolver.warmUp();
     }
   }
 

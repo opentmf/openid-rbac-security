@@ -23,6 +23,8 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * Tests for {@link JwtUtil}.
  */
 class JwtUtilTest {
+  /** Fixed, so the fixtures are deterministic — nothing here validates real expiry. */
+  private static final Instant FIXED_NOW = Instant.parse("2026-01-01T12:00:00Z");
 
   // ===================== extractNestedClaimValuesAsList =====================
 
@@ -262,8 +264,8 @@ class JwtUtilTest {
         .header("alg", "RS256")
         .claim("sub", "test-subject")
         .claims(c -> c.putAll(claims))
-        .issuedAt(Instant.now())
-        .expiresAt(Instant.now().plusSeconds(3600))
+        .issuedAt(FIXED_NOW)
+        .expiresAt(FIXED_NOW.plusSeconds(3600))
         .build();
   }
 
