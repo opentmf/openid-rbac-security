@@ -3,7 +3,6 @@ package org.opentmf.security.config.management;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
@@ -24,7 +23,6 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplicat
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
@@ -33,6 +31,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
+import org.springframework.security.config.annotation.web.configurers.ExceptionHandlingConfigurer;
 import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
@@ -58,7 +57,7 @@ import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMappi
  * {@link WebServerInitializedEvent} (child-context events propagate to the parent, and the child
  * carries the {@code management} server namespace), which also works for a random port
  * ({@code management.server.port: 0}). Until that event arrives no request can reach the
- * management server, so the matcher's initial {@code -1} sentinel never matches a real request.
+ * management server, so the matcher's initial empty state never matches a real request.
  *
  * @author Gokhan Demir
  */
@@ -74,16 +73,20 @@ public class ServletManagementSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties properties;
   private final ServletJwtSupport servletJwtSupport;
-  private final AtomicInteger managementPort = new AtomicInteger(-1);
-  private final AtomicReference<ApplicationContext> managementContext = new AtomicReference<>();
+
+  /**
+   * The management server's {@link WebServerInitializedEvent}, kept whole: the port and the
+   * child context arrive together in it, and storing them as one reference makes
+   * "port matched but context missing" unrepresentable, rather than a write-ordering rule a
+   * future edit could break.
+   */
+  private final AtomicReference<WebServerInitializedEvent> managementServer =
+      new AtomicReference<>();
 
   @EventListener
   void captureManagementPort(WebServerInitializedEvent event) {
     if (MANAGEMENT_SERVER_NAMESPACE.equals(event.getApplicationContext().getServerNamespace())) {
-      // Context first, port second. The chain matches on the port alone, so a request that
-      // arrives between these two writes would otherwise find a null context.
-      managementContext.set(event.getApplicationContext());
-      managementPort.set(event.getWebServer().getPort());
+      managementServer.set(event);
     }
   }
 
@@ -99,30 +102,34 @@ public class ServletManagementSecurityAutoConfiguration {
         .httpBasic(HttpBasicConfigurer::disable)
         .logout(LogoutConfigurer::disable)
         .authorizeHttpRequests(this::applyManagementAuthorization)
+        .exceptionHandling(this::configureDeniedHandler)
         .oauth2ResourceServer(this::configureResourceServer)
         .build();
   }
 
   private boolean isManagementPortRequest(HttpServletRequest request) {
-    return request.getLocalPort() == managementPort.get();
+    WebServerInitializedEvent event = managementServer.get();
+    return event != null && request.getLocalPort() == event.getWebServer().getPort();
   }
 
   private void configureResourceServer(OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) {
     servletJwtSupport.apply(oauth2);
-    if (properties.getManagement().getUnmatchedMethodResponse()
-        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
-      oauth2.accessDeniedHandler(methodAware(new BearerTokenAccessDeniedHandler()));
-    }
   }
 
   /**
-   * Decorates the denied-request handler so that a request for a method the actuator does not
-   * serve on that path is answered {@code 405} rather than {@code 403}, honouring the
-   * management section's own {@code unmatched-method-response}.
+   * Installs the denied-request handler on the {@code exceptionHandling} slot — which covers
+   * every authorization denial on this port, however the caller authenticated — so that a
+   * request for a method the actuator does not serve on that path is answered {@code 405}
+   * rather than {@code 403}, honouring the management section's own
+   * {@code unmatched-method-response}.
    */
-  private AccessDeniedHandler methodAware(AccessDeniedHandler delegate) {
-    return new MethodNotAllowedAccessDeniedHandler(
-        delegate, new ServletSupportedMethodsResolver(this::managementHandlerMappings));
+  private void configureDeniedHandler(ExceptionHandlingConfigurer<HttpSecurity> handling) {
+    if (properties.getManagement().getUnmatchedMethodResponse()
+        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      handling.accessDeniedHandler(new MethodNotAllowedAccessDeniedHandler(
+          new BearerTokenAccessDeniedHandler(),
+          new ServletSupportedMethodsResolver(this::managementHandlerMappings)));
+    }
   }
 
   /**
@@ -135,8 +142,8 @@ public class ServletManagementSecurityAutoConfiguration {
    * long after that event.
    */
   private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
-    ApplicationContext context = managementContext.get();
-    if (context == null) {
+    WebServerInitializedEvent event = managementServer.get();
+    if (event == null) {
       // Not ready yet. Throwing rather than returning an empty stream matters: the resolver
       // caches its snapshot on first success and SingletonSupplier caches successes but not
       // failures, so an empty snapshot taken during startup would disable this port's method
@@ -147,7 +154,10 @@ public class ServletManagementSecurityAutoConfiguration {
     // and excludes a parent bean only when the child happens to define one under the same name.
     // The main context's mappings describe the business API, and answering a management-port
     // denial from them would advertise verbs this port does not serve.
-    return context.getBeansOfType(RequestMappingInfoHandlerMapping.class).values().stream();
+    return event.getApplicationContext()
+        .getBeansOfType(RequestMappingInfoHandlerMapping.class)
+        .values()
+        .stream();
   }
 
   private void applyManagementAuthorization(

@@ -27,6 +27,7 @@ import org.springframework.security.config.annotation.web.reactive.EnableWebFlux
 import org.springframework.security.config.web.server.ServerHttpSecurity;
 import org.springframework.security.config.web.server.ServerHttpSecurity.AuthorizeExchangeSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.CsrfSpec;
+import org.springframework.security.config.web.server.ServerHttpSecurity.ExceptionHandlingSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.FormLoginSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
@@ -78,26 +79,29 @@ public class ReactiveManagementSecurityAutoConfiguration {
         .httpBasic(HttpBasicSpec::disable)
         .logout(LogoutSpec::disable)
         .authorizeExchange(this::applyManagementAuthorization)
+        .exceptionHandling(this::configureDeniedHandler)
         .oauth2ResourceServer(this::configureResourceServer)
         .build();
   }
 
   private void configureResourceServer(OAuth2ResourceServerSpec resourceServer) {
     reactiveJwtSupport.apply(resourceServer);
-    if (properties.getManagement().getUnmatchedMethodResponse()
-        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
-      resourceServer.accessDeniedHandler(methodAware(new BearerTokenServerAccessDeniedHandler()));
-    }
   }
 
   /**
-   * Decorates the denied-request handler so that a request for a method the actuator does not
-   * serve on that path is answered {@code 405} rather than {@code 403}, honouring the
-   * management section's own {@code unmatched-method-response}.
+   * Installs the denied-request handler on the {@code exceptionHandling} slot — which covers
+   * every authorization denial on this port, however the caller authenticated — so that a
+   * request for a method the actuator does not serve on that path is answered {@code 405}
+   * rather than {@code 403}, honouring the management section's own
+   * {@code unmatched-method-response}.
    */
-  private ServerAccessDeniedHandler methodAware(ServerAccessDeniedHandler delegate) {
-    return new MethodNotAllowedServerAccessDeniedHandler(
-        delegate, new ReactiveSupportedMethodsResolver(this::managementHandlerMappings));
+  private void configureDeniedHandler(ExceptionHandlingSpec handling) {
+    if (properties.getManagement().getUnmatchedMethodResponse()
+        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      handling.accessDeniedHandler(new MethodNotAllowedServerAccessDeniedHandler(
+          new BearerTokenServerAccessDeniedHandler(),
+          new ReactiveSupportedMethodsResolver(this::managementHandlerMappings)));
+    }
   }
 
   /**

@@ -41,9 +41,11 @@ class EndpointRulesTest {
   }
 
   @Test
-  void optionsAllow_whenGetDeclared_addsHeadAndOptions() {
+  void optionsAllow_whenGetDeclared_slotsHeadInRightAfterGet() {
+    // Spring's HttpOptionsHandler puts HEAD immediately after GET; matching its answer
+    // byte for byte means matching the order too, so DELETE comes after HEAD here.
     assertThat(EndpointRules.optionsAllow(ordered(HttpMethod.GET, HttpMethod.DELETE)))
-        .containsExactly(HttpMethod.GET, HttpMethod.DELETE, HttpMethod.HEAD, HttpMethod.OPTIONS);
+        .containsExactly(HttpMethod.GET, HttpMethod.HEAD, HttpMethod.DELETE, HttpMethod.OPTIONS);
   }
 
   @Test

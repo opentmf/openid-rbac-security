@@ -18,6 +18,7 @@ import org.springframework.http.HttpMethod;
 import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.security.web.access.AccessDeniedHandler;
 
 /**
@@ -91,10 +92,10 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() throws Exception {
-    MockHttpServletRequest request = request("PUT");
-    request.setAttribute(ServletBlacklistDenial.ATTRIBUTE, request.getRequestURI());
+    AccessDeniedException blacklistDenied =
+        new AuthorizationDeniedException("Access Denied", BlacklistDecision.INSTANCE);
 
-    handler().handle(request, response, DENIED);
+    handler().handle(request("PUT"), response, blacklistDenied);
 
     verify(delegate).handle(any(), any(), any());
     verifyNoInteractions(resolver);

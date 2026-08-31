@@ -69,42 +69,41 @@ public class ServletSecurityAutoConfiguration {
         .authorizeHttpRequests(this::applyOpenTmfSecurityDefinitions)
         .exceptionHandling(handling ->
             configureExceptionHandling(handling, entryPoint, deniedHandlers))
-        .oauth2ResourceServer(oauth2 ->
-            configureResourceServer(oauth2, entryPoint, deniedHandlers))
+        .oauth2ResourceServer(oauth2 -> configureResourceServer(oauth2, entryPoint))
         .build();
   }
 
   /**
-   * The denied-request handlers for one chain, decided once so that the two slots they are
-   * installed into cannot end up with different objects — or with a second, unreachable copy.
+   * The denied-request handler for one chain, decided once and installed on the
+   * {@code exceptionHandling} slot, which covers every authorization denial regardless of how
+   * the caller authenticated. Decorating only the resource server's bearer-token slot would
+   * leave a denial of an authenticated-but-non-bearer caller — an application adding its own
+   * pre-authentication mechanism beside this library — on the undecorated default, so the
+   * documented 405 behavior would silently depend on how the request authenticated.
    *
-   * <p>Setting {@code exceptionHandling}'s handler makes it global: Spring then ignores the
-   * resource server's per-matcher registration entirely. So exactly one slot is ever used. With
-   * a consumer-supplied handler the global slot carries it; without one, only the bearer-token
-   * slot needs the decoration, since every authenticated caller of this library carries a token.
+   * <p>Without a consumer-supplied handler the delegate is the same
+   * {@link BearerTokenAccessDeniedHandler} Spring's resource server would have installed for
+   * bearer callers, so their denials answer exactly as before; the change is that every other
+   * authenticated denial now goes through the same handler instead of the framework's default
+   * error page.
    */
   private final class DeniedHandlers {
 
-    private final ServletSupportedMethodsResolver resolver;
     private final AccessDeniedHandler global;
-    private final AccessDeniedHandler bearer;
 
     private DeniedHandlers(AccessDeniedHandler consumerHandler) {
       boolean methodAware = openTmfSecurityProperties.getUnmatchedMethodResponse()
           == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
-      this.resolver = methodAware
-          ? new ServletSupportedMethodsResolver(ServletSecurityAutoConfiguration.this::mappings)
-          : null;
-      this.global = (consumerHandler != null) ? decorate(consumerHandler) : null;
-      this.bearer = (consumerHandler != null || !methodAware)
-          ? null
-          : decorate(new BearerTokenAccessDeniedHandler());
-    }
-
-    private AccessDeniedHandler decorate(AccessDeniedHandler delegate) {
-      return (resolver == null)
-          ? delegate
-          : new MethodNotAllowedAccessDeniedHandler(delegate, resolver);
+      if (!methodAware) {
+        this.global = consumerHandler;
+        return;
+      }
+      AccessDeniedHandler delegate = (consumerHandler != null)
+          ? consumerHandler
+          : new BearerTokenAccessDeniedHandler();
+      this.global = new MethodNotAllowedAccessDeniedHandler(
+          delegate,
+          new ServletSupportedMethodsResolver(ServletSecurityAutoConfiguration.this::mappings));
     }
   }
 
@@ -190,21 +189,17 @@ public class ServletSecurityAutoConfiguration {
 
   /**
    * Besides the JWT wiring — one decoder, or an issuer-selecting resolver when
-   * {@code opentmf.security.issuers} is configured — applies the consumer-supplied handlers on
-   * the bearer-token path: invalid / expired / malformed tokens (401) and insufficient-scope
-   * denials (403), which the {@code BearerTokenAuthenticationFilter} handles before the
-   * {@code ExceptionTranslationFilter} ever sees them.
+   * {@code opentmf.security.issuers} is configured — applies the consumer-supplied entry point
+   * on the bearer-token path: invalid / expired / malformed tokens (401), which the
+   * {@code BearerTokenAuthenticationFilter} handles before the {@code ExceptionTranslationFilter}
+   * ever sees them. Denials are not configured here: the denied-request handler lives on the
+   * {@code exceptionHandling} slot, which covers this path too — see {@link DeniedHandlers}.
    */
   private void configureResourceServer(
-      OAuth2ResourceServerConfigurer<HttpSecurity> oauth2,
-      AuthenticationEntryPoint entryPoint,
-      DeniedHandlers deniedHandlers) {
+      OAuth2ResourceServerConfigurer<HttpSecurity> oauth2, AuthenticationEntryPoint entryPoint) {
     servletJwtSupport.apply(oauth2);
     if (entryPoint != null) {
       oauth2.authenticationEntryPoint(entryPoint);
-    }
-    if (deniedHandlers.bearer != null) {
-      oauth2.accessDeniedHandler(deniedHandlers.bearer);
     }
   }
 

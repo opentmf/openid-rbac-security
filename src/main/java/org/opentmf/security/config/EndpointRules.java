@@ -1,6 +1,7 @@
 package org.opentmf.security.config;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Optional;
 import java.util.Set;
@@ -16,6 +17,17 @@ import org.springframework.util.StringUtils;
  * @author Gokhan Demir
  */
 public final class EndpointRules {
+
+  /**
+   * What Spring answers on {@code OPTIONS} for a mapping that names no method: every method
+   * except {@code TRACE}, in declaration order. Constant, so built once — this sits on the
+   * denial path, which a caller controls the traffic on.
+   */
+  private static final Set<HttpMethod> ANY_METHOD_OPTIONS_ALLOW =
+      Arrays.stream(HttpMethod.values())
+          .filter(method -> !HttpMethod.TRACE.equals(method))
+          .collect(Collectors.collectingAndThen(
+              Collectors.toCollection(LinkedHashSet::new), Collections::unmodifiableSet));
 
   private EndpointRules() {
     // Utility class.
@@ -88,13 +100,16 @@ public final class EndpointRules {
    */
   public static Set<HttpMethod> optionsAllow(Set<HttpMethod> declared) {
     if (declared.isEmpty()) {
-      return Arrays.stream(HttpMethod.values())
-          .filter(method -> !HttpMethod.TRACE.equals(method))
-          .collect(Collectors.toCollection(LinkedHashSet::new));
+      return ANY_METHOD_OPTIONS_ALLOW;
     }
-    Set<HttpMethod> allowed = new LinkedHashSet<>(declared);
-    if (allowed.contains(HttpMethod.GET)) {
-      allowed.add(HttpMethod.HEAD);
+    Set<HttpMethod> allowed = new LinkedHashSet<>();
+    for (HttpMethod method : declared) {
+      allowed.add(method);
+      if (HttpMethod.GET.equals(method)) {
+        // Spring's HttpOptionsHandler slots HEAD in right after GET, not at the end; matching
+        // its answer byte for byte means matching the order too.
+        allowed.add(HttpMethod.HEAD);
+      }
     }
     allowed.add(HttpMethod.OPTIONS);
     return allowed;

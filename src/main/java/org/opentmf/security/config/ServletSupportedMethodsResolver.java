@@ -1,10 +1,11 @@
 package org.opentmf.security.config;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.Collections;
 import java.util.LinkedHashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpMethod;
@@ -34,7 +35,10 @@ import org.springframework.web.util.UrlPathHelper;
 @Slf4j
 public class ServletSupportedMethodsResolver {
 
-  private final Supplier<Set<RequestMappingInfo>> mappings;
+  private final Supplier<Snapshot> snapshot;
+
+  /** What one read of the handler mappings yielded, kept for the life of the resolver. */
+  private record Snapshot(Set<RequestMappingInfo> infos, UrlPathHelper pathHelper) {}
 
   /**
    * Creates a resolver over the given handler mappings.
@@ -47,16 +51,29 @@ public class ServletSupportedMethodsResolver {
    */
   public ServletSupportedMethodsResolver(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
-    this.mappings = SingletonSupplier.of(() -> snapshot(handlerMappings));
+    this.snapshot = SingletonSupplier.of(() -> snapshot(handlerMappings));
   }
 
-  private static Set<RequestMappingInfo> snapshot(
+  // getUrlPathHelper is deprecated together with the Ant-style matching it is read for; both
+  // leave whenever Spring drops that support, and the legacy branch of resolve() with them.
+  @SuppressWarnings("removal")
+  private static Snapshot snapshot(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
-    Set<RequestMappingInfo> infos = handlerMappings.get()
-        .flatMap(mapping -> mapping.getHandlerMethods().keySet().stream())
-        .collect(Collectors.toUnmodifiableSet());
+    List<RequestMappingInfoHandlerMapping> mappings = handlerMappings.get().toList();
+    // Registration order, kept: the Allow header must name methods in the same order run after
+    // run — and in the order Spring's own 405 would — not in the salted iteration order an
+    // unordered set happens to have in this JVM.
+    Set<RequestMappingInfo> infos = new LinkedHashSet<>();
+    mappings.forEach(mapping -> infos.addAll(mapping.getHandlerMethods().keySet()));
+    // A mapping still on the deprecated Ant matching resolves its lookup path with the helper
+    // the application configured, which need not be the default one. Matching here with a
+    // different helper than the DispatcherServlet uses would answer for different paths than
+    // the application actually serves.
+    UrlPathHelper pathHelper = mappings.isEmpty()
+        ? UrlPathHelper.defaultInstance
+        : mappings.get(0).getUrlPathHelper();
     log.debug("Captured {} request mappings for HTTP method resolution.", infos.size());
-    return infos;
+    return new Snapshot(Collections.unmodifiableSet(infos), pathHelper);
   }
 
   /**
@@ -72,8 +89,8 @@ public class ServletSupportedMethodsResolver {
       // Everything that can throw belongs inside: the lazy snapshot can fail on a denial that
       // arrives during context shutdown, and SingletonSupplier does not cache a failure, so it
       // would be retried and would escape on every later denial too.
-      Set<RequestMappingInfo> infos = mappings.get();
-      if (infos.isEmpty()) {
+      Snapshot captured = snapshot.get();
+      if (captured.infos().isEmpty()) {
         return SupportedMethods.notServed();
       }
       parsedHere = !ServletRequestPathUtils.hasParsedRequestPath(request);
@@ -86,9 +103,9 @@ public class ServletSupportedMethodsResolver {
       // feature rather than an exception per mapping, swallowed, and no 405 ever.
       resolvedHere = request.getAttribute(UrlPathHelper.PATH_ATTRIBUTE) == null;
       if (resolvedHere) {
-        UrlPathHelper.defaultInstance.resolveAndCacheLookupPath(request);
+        captured.pathHelper().resolveAndCacheLookupPath(request);
       }
-      return match(infos, request);
+      return match(captured.infos(), request);
     } catch (RuntimeException | LinkageError ex) {
       // A resolution failure must never turn a denial into a server error. LinkageError is in
       // the list deliberately: on a servlet application built without Spring MVC the very first

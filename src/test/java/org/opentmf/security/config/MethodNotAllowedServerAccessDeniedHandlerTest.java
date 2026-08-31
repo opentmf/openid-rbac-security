@@ -15,9 +15,11 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
 import org.springframework.mock.http.server.reactive.MockServerHttpRequest;
 import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
@@ -97,14 +99,28 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() {
-    ServerWebExchange exchange = exchange(HttpMethod.PUT);
-    exchange.getAttributes().put(
-        ReactiveBlacklistDenial.ATTRIBUTE, exchange.getRequest().getPath().value());
+    AccessDeniedException blacklistDenied =
+        new AuthorizationDeniedException("Access Denied", BlacklistDecision.INSTANCE);
 
-    StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
+    StepVerifier.create(handler().handle(exchange(HttpMethod.PUT), blacklistDenied))
+        .verifyComplete();
 
     verify(delegate).handle(any(), any());
     verifyNoInteractions(resolver);
+  }
+
+  @Test
+  void committedResponse_isLeftAlone() {
+    given(new SupportedMethods(methods(HttpMethod.GET), false));
+    ServerWebExchange exchange = exchange(HttpMethod.PUT);
+    exchange.getResponse().setStatusCode(HttpStatus.OK);
+    exchange.getResponse().setComplete().block();
+
+    StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
+
+    assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
+    assertThat(exchange.getResponse().getHeaders().getFirst(HttpHeaders.ALLOW)).isNull();
+    verifyNoInteractions(delegate);
   }
 
   @Test

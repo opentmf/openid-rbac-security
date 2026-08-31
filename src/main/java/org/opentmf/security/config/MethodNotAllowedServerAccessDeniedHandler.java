@@ -26,13 +26,19 @@ public class MethodNotAllowedServerAccessDeniedHandler implements ServerAccessDe
 
   @Override
   public Mono<Void> handle(ServerWebExchange exchange, AccessDeniedException exception) {
-    Optional<Set<HttpMethod>> allowed = resolveAllowed(exchange);
+    Optional<Set<HttpMethod>> allowed = resolveAllowed(exchange, exception);
     if (allowed.isEmpty()) {
       return delegate.handle(exchange, exception);
     }
     boolean options = HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod());
-    return Mono.fromRunnable(() -> {
+    return Mono.defer(() -> {
       var response = exchange.getResponse();
+      if (response.isCommitted()) {
+        // A committed response is read-only: writing the headers would throw and turn the
+        // denial into an error signal. The servlet container quietly ignores such writes;
+        // leaving the response alone is this stack's equivalent.
+        return Mono.empty();
+      }
       if (options) {
         // Spring's own OPTIONS answer goes through setAllow; use it so the rendering matches.
         response.getHeaders().setAllow(allowed.get());
@@ -41,11 +47,13 @@ public class MethodNotAllowedServerAccessDeniedHandler implements ServerAccessDe
       }
       response.setStatusCode(options ? HttpStatus.OK : HttpStatus.METHOD_NOT_ALLOWED);
       response.getHeaders().setContentLength(0);
+      return Mono.empty();
     });
   }
 
-  private Optional<Set<HttpMethod>> resolveAllowed(ServerWebExchange exchange) {
-    if (ReactiveBlacklistDenial.denied(exchange)) {
+  private Optional<Set<HttpMethod>> resolveAllowed(
+      ServerWebExchange exchange, AccessDeniedException exception) {
+    if (BlacklistDecision.causeOf(exception)) {
       // An explicitly closed path answers uniformly and discloses nothing about itself.
       return Optional.empty();
     }

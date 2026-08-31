@@ -432,7 +432,14 @@ Details worth knowing:
 - **Never without a token.** An anonymous request keeps its `401`. The method surface is only
   ever disclosed to a caller who already authenticated, and who can already read the OAS.
 - **`Allow` describes the resource, not the caller.** It is not filtered by the caller's roles,
-  which is what RFC 9110 specifies.
+  which is what RFC 9110 specifies. Its methods appear in the order Spring's own responses would
+  use — registration order, `HEAD` right after `GET` — so the denied answer is byte-identical to
+  the allowed-through one.
+- **Any authenticated caller, not only bearer.** The decision sits on the exception-translation
+  path, so it applies however the request authenticated — an application that adds its own
+  pre-authentication mechanism beside this library gets the same answers. Without a
+  consumer-supplied handler, the remaining `403` denials of such callers also take the RFC 6750
+  shape (status + `WWW-Authenticate`, empty body) rather than the framework's default error page.
 - **Blacklisted paths answer `403` uniformly**, with no `Allow` header. An explicitly closed path
   discloses nothing about itself.
 - **The response has no body, and your `AccessDeniedHandler` does not see it.** The library
@@ -441,7 +448,8 @@ Details worth knowing:
   405/200 responses will not reach your audit log** — hook the audit somewhere that sees them,
   or set `unmatched-method-response: deny`.
 - **Only annotation-based controllers are consulted.** A path served solely by a functional route
-  or a resource handler keeps answering `403`.
+  or a resource handler keeps answering `403`. Controllers still mapped through the deprecated
+  Ant-style matching are covered, resolved with the `UrlPathHelper` the application configured.
 - **Both ports.** `opentmf.security.management.unmatched-method-response` is the management-port
   twin, with the same default. It rarely comes into play while `management.other-endpoints`
   keeps its `authenticated` default, since unmatched requests then reach the actuator, which

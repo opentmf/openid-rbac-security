@@ -1,9 +1,9 @@
 package org.opentmf.security.config;
 
+import java.util.Collections;
 import java.util.LinkedHashSet;
 import java.util.Set;
 import java.util.function.Supplier;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpMethod;
@@ -41,11 +41,13 @@ public class ReactiveSupportedMethodsResolver {
 
   private static Set<RequestMappingInfo> snapshot(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
-    Set<RequestMappingInfo> infos = handlerMappings.get()
-        .flatMap(mapping -> mapping.getHandlerMethods().keySet().stream())
-        .collect(Collectors.toUnmodifiableSet());
+    // Registration order, kept: the Allow header must name methods in the same order run after
+    // run — and in the order Spring's own 405 would — not in the salted iteration order an
+    // unordered set happens to have in this JVM.
+    Set<RequestMappingInfo> infos = new LinkedHashSet<>();
+    handlerMappings.get().forEach(mapping -> infos.addAll(mapping.getHandlerMethods().keySet()));
     log.debug("Captured {} request mappings for HTTP method resolution.", infos.size());
-    return infos;
+    return Collections.unmodifiableSet(infos);
   }
 
   /**

@@ -1132,3 +1132,57 @@ removing `method: OPTIONS` left anonymous plain-`OPTIONS` probes with no narrow 
   the one shared decision that exists precisely so the two stacks cannot diverge. Trading a clear
   invariant for microseconds on a path that is already bounded by the mapping count is the wrong
   order of priorities while the semantics are this new.
+
+## 17. Third review round
+
+Nine findings; two were re-records of the §16.1 deferrals, which stand unchanged. The rest are
+fixed in this round.
+
+**The `Allow` order was not Spring's.** Two halves. `optionsAllow` appended `HEAD` at the end,
+while Spring's `HttpOptionsHandler` slots it in immediately after `GET` — the delimiter half of
+this invariant was fixed in round two, the ordering half is fixed now, the same way: copy the
+declared methods and insert `HEAD` right after `GET`. And both resolvers snapshotted the mappings
+with `Collectors.toUnmodifiableSet`, whose iteration order is salted per JVM run, so a path served
+by several mappings advertised its methods in an order that changed across restarts. The snapshot
+now keeps registration order in a `LinkedHashSet`. Byte-identical to the allowed-through answer,
+run after run, is the invariant — §5.2 — and now both halves of it hold.
+
+**The reactive handler wrote to a possibly-committed response.** A committed reactive response has
+read-only headers; `setAllow` on it throws inside `Mono.fromRunnable` and turns the denial into an
+error signal, where the servlet container just ignores late writes. The handler now checks
+`isCommitted()` and leaves a committed response alone — the servlet twin's semantics, made
+explicit.
+
+**The legacy-Ant path was resolved with the wrong helper.** Round two prepared the Ant-style
+lookup path with `UrlPathHelper.defaultInstance`; an application that configured its own helper
+(`alwaysUseFullPath`, `urlDecode=false`) was then matched differently by the resolver than by its
+own `DispatcherServlet`. The snapshot now also captures the mapping's configured helper — the
+accessor is deprecated together with the matching style it serves, and both leave together.
+
+**The 405 behaviour toggled on an unrelated bean.** The decoration was installed on the resource
+server's bearer-token slot when no consumer handler existed, and on the global exception-handling
+slot when one did — so a denial of an authenticated-but-non-bearer caller (an application adding
+its own pre-authentication beside this library) answered 403 or 405 depending on whether some
+consumer handler bean happened to exist. The handler now always lives on the exception-handling
+slot, which covers every authorization denial regardless of how the request authenticated; without
+a consumer handler the delegate is the same RFC 6750 bearer handler the resource server would have
+installed, so bearer callers see identical answers, and the non-bearer caller's remaining 403s
+take the RFC 6750 shape instead of the framework error page. The management chains moved the same
+way, and the slot truth-table collapsed to one field in passing.
+
+**The blacklist mark became a typed decision.** The request-attribute marker was a public string
+key any filter could set, guarded by a URI-equality heuristic that had already needed one round of
+repair for ERROR dispatches. Spring Security 7 carries the denying rule's own
+`AuthorizationResult` to the handler inside `AuthorizationDeniedException`, so the rule now
+returns (servlet) or raises (reactive — `verify()` would collapse the result to a bare
+`AccessDeniedException`) a `BlacklistDecision`, and the handlers check the exception's result by
+type. Both marker attributes, both `denied()` heuristics and every dispatch-lifetime concern are
+gone by construction.
+
+**The management capture is one reference again.** Port and child context were two atomics filled
+from one event, held consistent by a write-ordering comment. The configuration now stores the
+`WebServerInitializedEvent` itself and derives both, so "port matched but context missing" is
+unrepresentable rather than merely ordered away.
+
+**And a constant stopped being rebuilt.** The all-methods-except-`TRACE` answer for a no-method
+mapping's `OPTIONS` is knowable at class-load time and now is.

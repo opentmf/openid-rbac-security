@@ -45,7 +45,7 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
   public void handle(
       HttpServletRequest request, HttpServletResponse response, AccessDeniedException exception)
       throws IOException, ServletException {
-    Optional<Set<HttpMethod>> allowed = resolveAllowed(request);
+    Optional<Set<HttpMethod>> allowed = resolveAllowed(request, exception);
     if (allowed.isEmpty()) {
       delegate.handle(request, response, exception);
       return;
@@ -65,8 +65,9 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
    * Returns the methods to advertise, or empty when this denial is none of our business and
    * belongs to the decorated handler.
    */
-  private Optional<Set<HttpMethod>> resolveAllowed(HttpServletRequest request) {
-    if (ServletBlacklistDenial.denied(request)) {
+  private Optional<Set<HttpMethod>> resolveAllowed(
+      HttpServletRequest request, AccessDeniedException exception) {
+    if (BlacklistDecision.causeOf(exception)) {
       // An explicitly closed path answers uniformly and discloses nothing about itself.
       return Optional.empty();
     }

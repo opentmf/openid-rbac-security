@@ -70,36 +70,33 @@ public class ReactiveSecurityAutoConfiguration {
         .authorizeExchange(applyOpenTmfSecurityDefinitions())
         .exceptionHandling(handling ->
             configureExceptionHandling(handling, entryPoint, deniedHandlers))
-        .oauth2ResourceServer(configureResourceServer(entryPoint, deniedHandlers))
+        .oauth2ResourceServer(configureResourceServer(entryPoint))
         .build();
   }
 
   /**
-   * The denied-request handlers for one chain, decided once. See the servlet twin for why only
-   * one of the two slots is ever consulted.
+   * The denied-request handler for one chain, decided once and installed on the
+   * {@code exceptionHandling} slot, which covers every authorization denial regardless of how
+   * the caller authenticated. See the servlet twin for why decorating only the bearer-token
+   * slot would make the documented 405 behavior depend on how the request authenticated.
    */
   private final class DeniedHandlers {
 
-    private final ReactiveSupportedMethodsResolver resolver;
     private final ServerAccessDeniedHandler global;
-    private final ServerAccessDeniedHandler bearer;
 
     private DeniedHandlers(ServerAccessDeniedHandler consumerHandler) {
       boolean methodAware = openTmfSecurityProperties.getUnmatchedMethodResponse()
           == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
-      this.resolver = methodAware
-          ? new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings)
-          : null;
-      this.global = (consumerHandler != null) ? decorate(consumerHandler) : null;
-      this.bearer = (consumerHandler != null || !methodAware)
-          ? null
-          : decorate(new BearerTokenServerAccessDeniedHandler());
-    }
-
-    private ServerAccessDeniedHandler decorate(ServerAccessDeniedHandler delegate) {
-      return (resolver == null)
-          ? delegate
-          : new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver);
+      if (!methodAware) {
+        this.global = consumerHandler;
+        return;
+      }
+      ServerAccessDeniedHandler delegate = (consumerHandler != null)
+          ? consumerHandler
+          : new BearerTokenServerAccessDeniedHandler();
+      this.global = new MethodNotAllowedServerAccessDeniedHandler(
+          delegate,
+          new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings));
     }
   }
 
@@ -132,20 +129,18 @@ public class ReactiveSecurityAutoConfiguration {
 
   /**
    * Besides the JWT wiring — one decoder, or an issuer-selecting resolver when
-   * {@code opentmf.security.issuers} is configured — applies the consumer-supplied handlers on
-   * the bearer-token path: invalid / expired / malformed tokens (401) and insufficient-scope
-   * denials (403), which the bearer {@code AuthenticationWebFilter} handles before the
-   * {@code ExceptionTranslationWebFilter} ever sees them.
+   * {@code opentmf.security.issuers} is configured — applies the consumer-supplied entry point
+   * on the bearer-token path: invalid / expired / malformed tokens (401), which the bearer
+   * {@code AuthenticationWebFilter} handles before the {@code ExceptionTranslationWebFilter}
+   * ever sees them. Denials are not configured here: the denied-request handler lives on the
+   * {@code exceptionHandling} slot, which covers this path too — see {@link DeniedHandlers}.
    */
   private Customizer<OAuth2ResourceServerSpec> configureResourceServer(
-      ServerAuthenticationEntryPoint entryPoint, DeniedHandlers deniedHandlers) {
+      ServerAuthenticationEntryPoint entryPoint) {
     return resourceServer -> {
       reactiveJwtSupport.apply(resourceServer);
       if (entryPoint != null) {
         resourceServer.authenticationEntryPoint(entryPoint);
-      }
-      if (deniedHandlers.bearer != null) {
-        resourceServer.accessDeniedHandler(deniedHandlers.bearer);
       }
     };
   }
