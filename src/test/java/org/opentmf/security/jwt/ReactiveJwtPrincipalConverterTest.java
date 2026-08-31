@@ -18,6 +18,8 @@ import org.springframework.util.StringUtils;
 import reactor.core.publisher.Mono;
 
 class ReactiveJwtPrincipalConverterTest {
+  /** Fixed, so the fixtures are deterministic — nothing here validates real expiry. */
+  private static final Instant FIXED_NOW = Instant.parse("2026-01-01T12:00:00Z");
 
   private GrantedAuthoritiesConverter authoritiesConverter;
   private ReactiveJwtPrincipalConverter converter;
@@ -271,8 +273,8 @@ class ReactiveJwtPrincipalConverterTest {
     Jwt jwt = Jwt.withTokenValue("token")
         .header("alg", "RS256")
         .claim("groups", List.of("read"))
-        .issuedAt(Instant.now())
-        .expiresAt(Instant.now().plusSeconds(3600))
+        .issuedAt(FIXED_NOW)
+        .expiresAt(FIXED_NOW.plusSeconds(3600))
         .build();
 
     // When
@@ -289,8 +291,8 @@ class ReactiveJwtPrincipalConverterTest {
   private Jwt createJwt(Map<String, Object> claims) {
     Jwt.Builder builder = Jwt.withTokenValue("test-token")
         .header("alg", "RS256")
-        .issuedAt(Instant.now())
-        .expiresAt(Instant.now().plusSeconds(3600));
+        .issuedAt(FIXED_NOW)
+        .expiresAt(FIXED_NOW.plusSeconds(3600));
 
     // Add subject if not present
     if (!claims.containsKey("sub")) {

@@ -1,3 +1,4 @@
+org.opentmf.security.config.AccessRuleBindingAutoConfiguration
 org.opentmf.security.config.ReactiveSecurityAutoConfiguration
 org.opentmf.security.config.ServletSecurityAutoConfiguration
 org.opentmf.security.config.ServletJwtAutoConfiguration

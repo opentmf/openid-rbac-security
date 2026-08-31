@@ -8,7 +8,6 @@ import com.nimbusds.jwt.JWTParser;
 import java.text.ParseException;
 import java.time.Instant;
 import java.util.Collections;
-import java.util.Date;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Function;
@@ -58,11 +57,9 @@ public class JwtServiceImpl implements JwtService {
   @Override
   public boolean isExpiredToken(String token) {
     JWTClaimsSet claimsSet = parseJwt(token);
-    Optional<Date> expirationTimeDate = Optional.ofNullable(claimsSet.getExpirationTime());
 
-    return expirationTimeDate
-        .map(Date::toInstant)
-        .map(expirationTime -> Instant.now().isAfter(expirationTime))
+    return ofNullable(claimsSet.getExpirationTime())
+        .map(expiration -> Instant.now().isAfter(expiration.toInstant()))
         .orElseThrow(
             () -> new InvalidBearerTokenException("Failed to retrieve expiration time from token"));
   }
