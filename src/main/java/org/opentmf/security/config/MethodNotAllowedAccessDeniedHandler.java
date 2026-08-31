@@ -51,6 +51,12 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
       return;
     }
     boolean options = HttpMethod.OPTIONS.matches(request.getMethod());
+    if (!response.isCommitted()) {
+      // A filter may have buffered body bytes before the denial surfaced. They would survive
+      // these writes and contradict the Content-Length below — Spring's own handler clears
+      // them via sendError, which resets the buffer, so this path must reset it too.
+      response.resetBuffer();
+    }
     response.setHeader(
         HttpHeaders.ALLOW,
         options

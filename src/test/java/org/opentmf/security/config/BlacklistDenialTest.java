@@ -9,6 +9,7 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.security.authorization.AuthorizationResult;
+import org.springframework.security.authorization.SingleResultAuthorizationManager;
 import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.security.web.server.authorization.AuthorizationContext;
 import reactor.core.publisher.Mono;
@@ -22,10 +23,18 @@ import reactor.test.StepVerifier;
  */
 class BlacklistDenialTest {
 
+  /**
+   * The servlet side registers Spring's {@code SingleResultAuthorizationManager} with the
+   * decision; this pins the drop-in assumption that the manager returns it unchanged.
+   */
   @Test
   void servletRule_deniesWithTheBlacklistDecision() {
-    AuthorizationResult result = new ServletBlacklistDenial().authorize(
-        () -> null, new RequestAuthorizationContext(new MockHttpServletRequest("PUT", "/closed")));
+    AuthorizationResult result =
+        new SingleResultAuthorizationManager<RequestAuthorizationContext>(
+            BlacklistDecision.INSTANCE)
+            .authorize(
+                () -> null,
+                new RequestAuthorizationContext(new MockHttpServletRequest("PUT", "/closed")));
 
     assertThat(result.isGranted()).isFalse();
     assertThat(result).isInstanceOf(BlacklistDecision.class);

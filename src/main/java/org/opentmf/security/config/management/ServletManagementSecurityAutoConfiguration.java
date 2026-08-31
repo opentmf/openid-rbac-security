@@ -7,9 +7,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.opentmf.security.config.BlacklistDecision;
 import org.opentmf.security.config.EndpointRules;
 import org.opentmf.security.config.MethodNotAllowedAccessDeniedHandler;
-import org.opentmf.security.config.ServletBlacklistDenial;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletJwtSupport;
 import org.opentmf.security.config.ServletSupportedMethodsResolver;
@@ -22,12 +22,14 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.SingleResultAuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
@@ -39,6 +41,7 @@ import org.springframework.security.config.annotation.web.configurers.oauth2.ser
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 
 /**
@@ -75,18 +78,21 @@ public class ServletManagementSecurityAutoConfiguration {
   private final ServletJwtSupport servletJwtSupport;
 
   /**
-   * The management server's {@link WebServerInitializedEvent}, kept whole: the port and the
-   * child context arrive together in it, and storing them as one reference makes
-   * "port matched but context missing" unrepresentable, rather than a write-ordering rule a
-   * future edit could break.
+   * What the management server's {@link WebServerInitializedEvent} carried: the port and the
+   * child context arrive together in it, and storing them as one reference makes "port matched
+   * but context missing" unrepresentable, rather than a write-ordering rule a future edit could
+   * break. The port is copied out once — the matcher runs for every request on every port, and
+   * should compare an {@code int}, not re-derive it from the web server each time.
    */
-  private final AtomicReference<WebServerInitializedEvent> managementServer =
-      new AtomicReference<>();
+  private record ManagementServer(int port, ApplicationContext context) {}
+
+  private final AtomicReference<ManagementServer> managementServer = new AtomicReference<>();
 
   @EventListener
   void captureManagementPort(WebServerInitializedEvent event) {
     if (MANAGEMENT_SERVER_NAMESPACE.equals(event.getApplicationContext().getServerNamespace())) {
-      managementServer.set(event);
+      managementServer.set(
+          new ManagementServer(event.getWebServer().getPort(), event.getApplicationContext()));
     }
   }
 
@@ -108,8 +114,8 @@ public class ServletManagementSecurityAutoConfiguration {
   }
 
   private boolean isManagementPortRequest(HttpServletRequest request) {
-    WebServerInitializedEvent event = managementServer.get();
-    return event != null && request.getLocalPort() == event.getWebServer().getPort();
+    ManagementServer server = managementServer.get();
+    return server != null && request.getLocalPort() == server.port();
   }
 
   private void configureResourceServer(OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) {
@@ -142,8 +148,8 @@ public class ServletManagementSecurityAutoConfiguration {
    * long after that event.
    */
   private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
-    WebServerInitializedEvent event = managementServer.get();
-    if (event == null) {
+    ManagementServer server = managementServer.get();
+    if (server == null) {
       // Not ready yet. Throwing rather than returning an empty stream matters: the resolver
       // caches its snapshot on first success and SingletonSupplier caches successes but not
       // failures, so an empty snapshot taken during startup would disable this port's method
@@ -154,7 +160,7 @@ public class ServletManagementSecurityAutoConfiguration {
     // and excludes a parent bean only when the child happens to define one under the same name.
     // The main context's mappings describe the business API, and answering a management-port
     // denial from them would advertise verbs this port does not serve.
-    return event.getApplicationContext()
+    return server.context()
         .getBeansOfType(RequestMappingInfoHandlerMapping.class)
         .values()
         .stream();
@@ -164,7 +170,10 @@ public class ServletManagementSecurityAutoConfiguration {
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
           requests) {
     Management management = properties.getManagement();
-    var blacklistDenial = new ServletBlacklistDenial();
+    // Spring's own constant-result manager, denying with the recognisable BlacklistDecision.
+    var blacklistDenial =
+        new SingleResultAuthorizationManager<RequestAuthorizationContext>(
+            BlacklistDecision.INSTANCE);
     management.getBlacklist().forEach(path ->
         requests.requestMatchers(path).access(blacklistDenial));
     management.getWhitelist().forEach(path -> requests.requestMatchers(path).permitAll());

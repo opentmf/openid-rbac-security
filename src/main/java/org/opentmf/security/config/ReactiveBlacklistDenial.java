@@ -8,13 +8,14 @@ import org.springframework.security.web.server.authorization.AuthorizationContex
 import reactor.core.publisher.Mono;
 
 /**
- * The reactive twin of {@code ServletBlacklistDenial}; see {@link BlacklistDecision} for why the
+ * Denies a blacklisted path with a {@link BlacklistDecision}; see that class for why the
  * deciding rule marks the denial rather than the handler re-matching the configured paths.
  *
- * <p>Unlike the servlet {@code AuthorizationFilter}, the reactive
- * {@code ReactiveAuthorizationManager#verify} collapses a denying decision into a bare
- * {@code AccessDeniedException}, losing the decision on the way. So this manager raises the
- * carrying exception itself instead of returning the decision.
+ * <p>Hand-written where the servlet side simply uses Spring's
+ * {@code SingleResultAuthorizationManager}: unlike the servlet {@code AuthorizationFilter},
+ * the reactive {@code ReactiveAuthorizationManager#verify} collapses a denying decision into a
+ * bare {@code AccessDeniedException}, losing the decision on the way. So this manager raises
+ * the carrying exception itself instead of returning the decision.
  *
  * @author Gokhan Demir
  */

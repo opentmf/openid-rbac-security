@@ -1186,3 +1186,68 @@ unrepresentable rather than merely ordered away.
 
 **And a constant stopped being rebuilt.** The all-methods-except-`TRACE` answer for a no-method
 mapping's `OPTIONS` is knowable at class-load time and now is.
+
+## 18. Fourth review round — polish
+
+Nine findings; four were fixed here, the rest are recorded in §19 for the maintainer.
+
+**`resetBuffer()` before writing the 405/200.** A filter that buffered body bytes before the
+denial surfaced would have had them flushed against `Content-Length: 0`. Spring's own handler is
+immune because `sendError` resets the buffer; the servlet handler now does the same (guarded by
+`isCommitted()`, since a committed response cannot be reset — or changed at all).
+
+**One authority renders the `Allow` header.** The reactive OPTIONS branch used
+`HttpHeaders.setAllow` while the servlet branch went through `EndpointRules`; both stacks now go
+through `EndpointRules.optionsAllowHeader` / `allowHeader`, so a future rendering change cannot
+move one stack and not the other.
+
+**The management port is an `int` again.** The single-event capture from §17 made the
+per-request matcher re-derive the port from the web server on every request to every port. The
+capture now stores a small record of the port and the child context — the "arrive together"
+invariant stays, the matcher compares a primitive.
+
+**`ServletBlacklistDenial` is gone.** Spring ships `SingleResultAuthorizationManager`, which
+returns a given `AuthorizationResult` unchanged — registering it with `BlacklistDecision` is a
+drop-in replacement, pinned by a unit test. The reactive manager stays hand-written for the
+reason its javadoc states: `verify()` collapses a returned decision into a bare
+`AccessDeniedException`, so the reactive rule must raise the carrying exception itself.
+
+## 19. Open decisions — for the maintainer
+
+None of these block the merge; each is a call the review deliberately leaves to you.
+
+1. **The default of `unmatched-method-response` in a minor release.** The disclosing behaviour
+   (405/200 with `Allow`, consumer handler bypassed for those responses) ships as the default;
+   `deny` restores 2.3.x. Documented in CHANGELOG/README, and §11 already records the case for
+   gating this behind a major version. Options, in increasing friction: keep as is; default to
+   `deny` and flip in 3.0; or keep the default but log a one-line startup notice while the
+   property is unset (the library already has the management-port warner as a precedent).
+
+2. **Startup detection for previously-dead lowercase method rules.** Relaxed enum binding
+   silently activates a `method: get` rule that 2.3.x never matched — for `allowed-endpoints`
+   that is fail-open. The CHANGELOG says "grep your configuration"; a
+   `@ConfigurationPropertiesBinding Converter<String, EndpointMethod>` would see the raw string
+   before relaxed binding erases it, and could fail or `WARN` on non-uppercase input. Cheap to
+   add, but it is a policy choice about how loud the upgrade should be.
+
+3. **The §16.1 deferrals stand** (wider de-duplication across the four configurations; the
+   `match()` short-circuit). One half of the second was re-raised this round with a sharper
+   framing: the reactive resolver's first-denial snapshot does blocking bean-factory work on a
+   Netty event-loop thread, serialized behind `SingletonSupplier`'s lock — an availability cost
+   on an attacker-reachable path, and a hard failure under BlockHound. An
+   `ApplicationReadyEvent` warm-up would keep the lazy-init rationale intact. Your call whether
+   that changes the deferral.
+
+4. **Two low-likelihood residuals, recorded rather than fixed.** The one-shot snapshot never
+   refreshes, so consumers that register or remove mappings at runtime
+   (`registerMapping`, `@RefreshScope`, devtools) get stale 405/`Allow` answers for the life of
+   the process; and on the deprecated Ant path the `UrlPathHelper` is taken from the first
+   mapping `getBeansOfType` returns, which with multiple mapping beans need not be the one being
+   matched. Both need unusual setups; both are cheap to note in the README's limits list if you
+   would rather document than engineer around them.
+
+5. **Sonar baseline.** The quality gate passes and the branch introduces zero findings. 17 INFO
+   findings predate it and are left for their own change: 16× `S8692` (system clock in tests —
+   `TestIssuer`, the JWT converter/util tests, both MultiIssuer ITs) and 1× `S2143`
+   (`JwtServiceImpl` still on `java.util.Date`). Mechanical to clear, but they touch files this
+   PR otherwise does not.

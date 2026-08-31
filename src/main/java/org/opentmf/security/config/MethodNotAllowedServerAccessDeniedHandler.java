@@ -39,12 +39,13 @@ public class MethodNotAllowedServerAccessDeniedHandler implements ServerAccessDe
         // writes, and leaving the response alone is this stack's equivalent.
         return Mono.empty();
       }
-      if (options) {
-        // Spring's own OPTIONS answer goes through setAllow; use it so the rendering matches.
-        response.getHeaders().setAllow(allowed.get());
-      } else {
-        response.getHeaders().set(HttpHeaders.ALLOW, EndpointRules.allowHeader(allowed.get()));
-      }
+      // Rendering goes through EndpointRules on both stacks, so one authority owns the header
+      // and the servlet and reactive answers cannot drift apart one fix at a time.
+      response.getHeaders().set(
+          HttpHeaders.ALLOW,
+          options
+              ? EndpointRules.optionsAllowHeader(allowed.get())
+              : EndpointRules.allowHeader(allowed.get()));
       response.setStatusCode(options ? HttpStatus.OK : HttpStatus.METHOD_NOT_ALLOWED);
       response.getHeaders().setContentLength(0);
       return Mono.empty();

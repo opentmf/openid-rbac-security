@@ -17,6 +17,7 @@ import org.springframework.boot.context.properties.EnableConfigurationProperties
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpMethod;
+import org.springframework.security.authorization.SingleResultAuthorizationManager;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -31,6 +32,7 @@ import org.springframework.security.oauth2.server.resource.web.access.BearerToke
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 
@@ -164,7 +166,12 @@ public class ServletSecurityAutoConfiguration {
   private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
-      var blacklistDenial = new ServletBlacklistDenial();
+      // Spring's own constant-result manager, denying with the recognisable BlacklistDecision,
+      // which AuthorizationFilter carries to the denied-request handler inside the thrown
+      // exception. See BlacklistDecision for why the type matters.
+      var blacklistDenial =
+          new SingleResultAuthorizationManager<RequestAuthorizationContext>(
+              BlacklistDecision.INSTANCE);
       openTmfSecurityProperties.getBlacklist().forEach(blackListedEndpoint ->
           requests.requestMatchers(blackListedEndpoint).access(blacklistDenial));
     }
