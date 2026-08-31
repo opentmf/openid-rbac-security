@@ -1302,3 +1302,41 @@ real decoders against wall-clock time, so the clock must be real) and the expiry
 mint through `TestIssuer.now()`; and `JwtServiceImpl` no longer touches `java.util.Date` — the
 one Nimbus `Date` return value is converted to `Instant` at the call site. The quality gate and
 the issue list are both clean: zero open findings on the project, of any age.
+
+## 21. Fifth review round — the decisions' own implementation reviewed
+
+Ten findings on the §20 work itself; all acted on before the push.
+
+**The guard now rejects every spelling lenient binding would accept.** Case was only one axis:
+Boot's canonicalization drops separators and whitespace too, so `G-E-T`, `G_E_T` and `"GET "`
+were dead 2.x rules that would still have come alive. The guard applies the same
+canonicalization the lenient converter does and rejects any value that maps to a constant
+without being spelled as one; a value lenient binding cannot map either is left to the real
+bind. It is also pinned eager via a `LazyInitializationExcludeFilter` — under
+`spring.main.lazy-initialization=true` an unreferenced guard bean would otherwise never
+instantiate and the check would silently not run. And the property tree it walks is now named
+once, in `OpenTmfSecurityProperties.METHOD_RULE_LISTS`, next to the fields it mirrors.
+
+**The live reads got a one-second cache.** `getHandlerMethods()` takes the registry lock and
+copies the whole registry per call, and the denial path is attacker-reachable — sustained probing
+would have turned registry copies into a CPU amplifier on, reactively, event-loop threads. The
+mapping/info view in `HandlerMappingLookup` (now also the single home of the warm-up and the
+bean lookup) is cached for one second: runtime-registered mappings stay visible almost
+immediately, and a probe storm hits a cached list. The Ant-era lookup-path preparation is also
+skipped entirely for mappings on parsed patterns (`usesPathPatterns()`), which is every mapping
+in a default application.
+
+**The ordering story is now told honestly, everywhere.** Spring's own `Allow` ordering follows
+its salted registry iteration and per-mapping declaration order — not reproducible from outside,
+even for a single mapping — so the byte-identity language in `EndpointRules` was softened to
+what is actually guaranteed: Spring's delimiters exactly, the library's canonical order
+deterministically. The canonical list includes `TRACE` (it is in `HttpMethod.values()`, and a
+mapping may declare it); the dead `addAll` tail in `SupportedMethods.canonical` that implied an
+ordering for impossible extras is gone.
+
+**The warm-up wiring collapsed into one component.** `SupportedMethodsWarmer` fires on either
+startup event, unconditionally — warming is idempotent and failure-tolerant, so a guard per
+context type was four copies of nothing. Each configuration registers its resolver in one line.
+`matchOneMapping` became pure while it was being touched: it returns a per-mapping
+`SupportedMethods` and the caller merges, so no future reader can break the header by
+short-circuiting a side-effecting accumulator.

@@ -394,8 +394,9 @@ optional and there is no property to turn it off.
 > role-restricted management `GET` rule tightens `HEAD` there by default. Give the probe the
 > role, or `whitelist` the path.
 
-Method values must be written **upper-case**; a lowercase or mixed-case value fails at startup
-with a message naming the entry. This strictness exists for upgraders: before 3.0.0 the value
+Method values must be spelled **exactly** as the constants above; any spelling that differs but
+would still bind through Boot's lenient conversion — `get`, `G-E-T`, a stray space — fails at
+startup with a message naming the entry. This strictness exists for upgraders: before 3.0.0 the value
 bound through `HttpMethod.valueOf`, which preserves case, and the request matchers compare verbs
 by exact string — so a lowercase rule silently never matched and its path fell through to
 `other-endpoints`. Boot's relaxed enum binding would have brought such a dead rule to life on
@@ -435,8 +436,9 @@ Details worth knowing:
   ever disclosed to a caller who already authenticated, and who can already read the OAS.
 - **`Allow` describes the resource, not the caller.** It is not filtered by the caller's roles,
   which is what RFC 9110 specifies. Its methods appear in a fixed canonical order — `GET, HEAD,
-  POST, PUT, PATCH, DELETE, OPTIONS` — deterministic run after run and identical on both stacks,
-  so contract tests can compare the header exactly.
+  POST, PUT, PATCH, DELETE, OPTIONS, TRACE`, the last two only when the application itself maps
+  them — deterministic run after run and identical on both stacks, so contract tests can compare
+  the header exactly.
 - **Any authenticated caller, not only bearer.** The decision sits on the exception-translation
   path, so it applies however the request authenticated — an application that adds its own
   pre-authentication mechanism beside this library gets the same answers. Without a

@@ -106,8 +106,9 @@ public final class EndpointRules {
     for (HttpMethod method : declared) {
       allowed.add(method);
       if (HttpMethod.GET.equals(method)) {
-        // Spring's HttpOptionsHandler slots HEAD in right after GET, not at the end; matching
-        // its answer byte for byte means matching the order too.
+        // HEAD goes right after GET — where Spring's HttpOptionsHandler puts it, and where the
+        // library's canonical order (see SupportedMethods) already has it for resolver-supplied
+        // sets; doing it here too keeps directly-built sets consistent.
         allowed.add(HttpMethod.HEAD);
       }
     }
@@ -132,8 +133,11 @@ public final class EndpointRules {
    * a bare {@code ","}.
    *
    * <p>Yes, the two differ by a space — that is Spring's inconsistency, not ours, and matching
-   * each path exactly is the point: whatever this library answers on a denied request should be
-   * byte-identical to what the application answers when the same request is allowed through.
+   * each path's delimiter exactly is the point. The <em>order</em> of the methods is the
+   * library's own canonical one (see {@code SupportedMethods}): Spring's ordering follows its
+   * registry's per-JVM-salted iteration and a mapping's declaration order, neither of which is
+   * reproducible from outside, so the library trades exact byte-parity of the ordering for one
+   * that is deterministic run after run.
    *
    * @param methods the methods to advertise, never {@code null}
    * @return the header value

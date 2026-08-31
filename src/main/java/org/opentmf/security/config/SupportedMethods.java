@@ -22,11 +22,13 @@ public record SupportedMethods(Set<HttpMethod> declared, boolean acceptsAnyMetho
 
   /**
    * Imposes the one deterministic order there is: {@link HttpMethod#values()} order — GET,
-   * HEAD, POST, PUT, PATCH, DELETE, OPTIONS. The handler mappings are consulted through an
-   * unordered view whose iteration order is salted per JVM run (Spring's own registry is the
-   * same), so the order has to be imposed somewhere for every {@code Allow} header derived from
-   * this record to read identically run after run. Methods outside the standard set, should a
-   * producer ever supply one, follow the standard ones.
+   * HEAD, POST, PUT, PATCH, DELETE, OPTIONS, TRACE (the last two appearing only when the
+   * application itself maps them). The handler mappings are consulted through an unordered view
+   * whose iteration order is salted per JVM run (Spring's own registry is the same), so the
+   * order has to be imposed somewhere for every {@code Allow} header derived from this record
+   * to read identically run after run. Every producer fills {@code declared} from
+   * {@code RequestMethod}, whose constants all appear in {@code values()}, so the loop is
+   * exhaustive.
    */
   private static Set<HttpMethod> canonical(Set<HttpMethod> declared) {
     Set<HttpMethod> ordered = new LinkedHashSet<>();
@@ -35,7 +37,6 @@ public record SupportedMethods(Set<HttpMethod> declared, boolean acceptsAnyMetho
         ordered.add(method);
       }
     }
-    ordered.addAll(declared);
     return Collections.unmodifiableSet(ordered);
   }
 

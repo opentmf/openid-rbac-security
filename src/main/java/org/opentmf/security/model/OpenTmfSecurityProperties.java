@@ -21,9 +21,20 @@ import org.springframework.validation.annotation.Validated;
  */
 @Getter
 @Setter
-@ConfigurationProperties(prefix = "opentmf.security")
+@ConfigurationProperties(prefix = OpenTmfSecurityProperties.PREFIX)
 @Validated
 public class OpenTmfSecurityProperties {
+
+  /** The configuration prefix; shared with the startup guards that read the raw properties. */
+  public static final String PREFIX = "opentmf.security";
+
+  /**
+   * The property names of the rule lists whose entries carry a {@code method}. Kept next to the
+   * fields they name so that renaming or adding such a list is a one-place change — the startup
+   * case guard walks exactly these lists, under {@link #PREFIX} and its management twin.
+   */
+  public static final List<String> METHOD_RULE_LISTS =
+      List.of("allowed-endpoints", "secure-endpoints");
 
   /**
    * The list of httpMethod, path and necessary roles in terms of anyMatch.

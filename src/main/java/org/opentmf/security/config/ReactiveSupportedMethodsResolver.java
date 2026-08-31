@@ -24,7 +24,8 @@ import org.springframework.web.server.ServerWebExchange;
 @Slf4j
 public class ReactiveSupportedMethodsResolver {
 
-  private final HandlerMappingLookup<RequestMappingInfoHandlerMapping> mappings;
+  private final HandlerMappingLookup<RequestMappingInfoHandlerMapping, RequestMappingInfo>
+      mappings;
 
   /**
    * Creates a resolver over the given handler mappings.
@@ -35,7 +36,8 @@ public class ReactiveSupportedMethodsResolver {
    */
   public ReactiveSupportedMethodsResolver(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
-    this.mappings = new HandlerMappingLookup<>(handlerMappings);
+    this.mappings =
+        new HandlerMappingLookup<>(handlerMappings, mapping -> mapping.getHandlerMethods().keySet());
   }
 
   /** Primes the lazy handler-mapping lookup off the request path; failures retry on first use. */
@@ -56,11 +58,11 @@ public class ReactiveSupportedMethodsResolver {
       // is caught deliberately: on an application built without the matching web stack the
       // first touch of a handler-mapping type raises NoClassDefFoundError, which would
       // otherwise turn every denial into a 500.
-      List<RequestMappingInfoHandlerMapping> beans = mappings.get();
-      if (beans.isEmpty()) {
+      var entries = mappings.entries();
+      if (entries.isEmpty()) {
         return SupportedMethods.notServed();
       }
-      return match(beans, exchange);
+      return match(entries, exchange);
     } catch (RuntimeException | LinkageError ex) {
       // A resolution failure must never turn a denial into a server error.
       log.debug("Could not resolve supported methods; leaving the denial as it is.", ex);
@@ -69,12 +71,13 @@ public class ReactiveSupportedMethodsResolver {
   }
 
   private static SupportedMethods match(
-      List<RequestMappingInfoHandlerMapping> beans, ServerWebExchange exchange) {
+      List<HandlerMappingLookup.Entry<RequestMappingInfoHandlerMapping, RequestMappingInfo>>
+          entries,
+      ServerWebExchange exchange) {
     Set<HttpMethod> declared = new LinkedHashSet<>();
     boolean acceptsAnyMethod = false;
-    for (RequestMappingInfoHandlerMapping mapping : beans) {
-      // Read live, not snapshotted, so runtime-registered mappings are answered for.
-      for (RequestMappingInfo info : mapping.getHandlerMethods().keySet()) {
+    for (var entry : entries) {
+      for (RequestMappingInfo info : entry.infos()) {
         if (info.getPatternsCondition().getMatchingCondition(exchange) == null) {
           continue;
         }

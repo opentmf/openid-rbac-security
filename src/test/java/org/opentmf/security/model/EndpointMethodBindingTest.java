@@ -56,9 +56,14 @@ class EndpointMethodBindingTest {
         .hasMessageContaining("opentmf.security.endpoint");
   }
 
+  /**
+   * Every spelling Boot's lenient conversion would map onto a constant — case differences,
+   * separator characters, stray whitespace — is a dead 2.x rule that would silently come alive,
+   * and must be rejected.
+   */
   @ParameterizedTest
-  @ValueSource(strings = {"get", "Get", "gEt"})
-  void theGuard_rejectsANonUpperCaseMethod(String method) {
+  @ValueSource(strings = {"get", "Get", "gEt", "G-E-T", "G_E_T", "GET ", " get"})
+  void theGuard_rejectsASpellingLenientBindingWouldAccept(String method) {
     MockEnvironment environment = new MockEnvironment()
         .withProperty("opentmf.security.allowed-endpoints[0].method", method)
         .withProperty("opentmf.security.allowed-endpoints[0].path", "/internal");
@@ -66,8 +71,19 @@ class EndpointMethodBindingTest {
 
     assertThatThrownBy(guard::afterPropertiesSet)
         .isInstanceOf(IllegalStateException.class)
-        .hasMessageContaining("must be written upper-case")
+        .hasMessageContaining("must be spelled exactly 'GET'")
         .hasMessageContaining("allowed-endpoints[0]");
+  }
+
+  /** A value lenient binding cannot map either is left to the real bind and its own failure. */
+  @Test
+  void theGuard_leavesAnUnmappableValueToTheRealBind() {
+    MockEnvironment environment = new MockEnvironment()
+        .withProperty("opentmf.security.allowed-endpoints[0].method", "FOO")
+        .withProperty("opentmf.security.allowed-endpoints[0].path", "/internal");
+
+    assertThatCode(() -> new EndpointMethodCaseGuard(environment).afterPropertiesSet())
+        .doesNotThrowAnyException();
   }
 
   @Test
@@ -115,7 +131,7 @@ class EndpointMethodBindingTest {
           assertThat(context).hasFailed();
           assertThat(context.getStartupFailure())
               .rootCause()
-              .hasMessageContaining("must be written upper-case");
+              .hasMessageContaining("must be spelled exactly 'GET'");
         });
   }
 

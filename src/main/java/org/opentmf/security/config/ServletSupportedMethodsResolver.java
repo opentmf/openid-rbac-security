@@ -21,9 +21,10 @@ import org.springframework.web.util.UrlPathHelper;
  *
  * <p>The handler-mapping <em>beans</em> are looked up once, lazily, on first use — never while
  * the security filter chain is being built, which would force Spring MVC's infrastructure to
- * initialize too early. Their mappings, however, are read live on every resolution, so a
- * consumer that registers or removes mappings at runtime ({@code registerMapping}, a refreshed
- * scope) is answered from what the application serves now, not from a startup snapshot.
+ * initialize too early. Their mappings are read through a briefly cached view (at most one
+ * second stale — see {@link HandlerMappingLookup}), so a consumer that registers or removes
+ * mappings at runtime ({@code registerMapping}, a refreshed scope) is answered from what the
+ * application serves now, not from a startup snapshot.
  *
  * <p>Only annotation-based handler mappings contribute. Functional routes, resource handlers
  * and any other {@code HandlerMapping} are invisible here, so a path served only that way is
@@ -34,7 +35,8 @@ import org.springframework.web.util.UrlPathHelper;
 @Slf4j
 public class ServletSupportedMethodsResolver {
 
-  private final HandlerMappingLookup<RequestMappingInfoHandlerMapping> mappings;
+  private final HandlerMappingLookup<RequestMappingInfoHandlerMapping, RequestMappingInfo>
+      mappings;
 
   /**
    * Creates a resolver over the given handler mappings.
@@ -47,7 +49,8 @@ public class ServletSupportedMethodsResolver {
    */
   public ServletSupportedMethodsResolver(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
-    this.mappings = new HandlerMappingLookup<>(handlerMappings);
+    this.mappings =
+        new HandlerMappingLookup<>(handlerMappings, mapping -> mapping.getHandlerMethods().keySet());
   }
 
   /** Primes the lazy handler-mapping lookup off the request path; failures retry on first use. */
@@ -70,15 +73,15 @@ public class ServletSupportedMethodsResolver {
       // deliberately: on a servlet application built without Spring MVC the very first touch of
       // a handler-mapping type raises NoClassDefFoundError, which is an Error and would
       // otherwise sail past this and turn every denial into a 500.
-      List<RequestMappingInfoHandlerMapping> beans = mappings.get();
-      if (beans.isEmpty()) {
+      var entries = mappings.entries();
+      if (entries.isEmpty()) {
         return SupportedMethods.notServed();
       }
       parsedHere = !ServletRequestPathUtils.hasParsedRequestPath(request);
       if (parsedHere) {
         ServletRequestPathUtils.parseAndCache(request);
       }
-      return match(beans, request);
+      return match(entries, request);
     } catch (RuntimeException | LinkageError ex) {
       // A resolution failure must never turn a denial into a server error.
       log.debug("Could not resolve supported methods; leaving the denial as it is.", ex);
@@ -91,38 +94,41 @@ public class ServletSupportedMethodsResolver {
   }
 
   private static SupportedMethods match(
-      List<RequestMappingInfoHandlerMapping> beans, HttpServletRequest request) {
+      List<HandlerMappingLookup.Entry<RequestMappingInfoHandlerMapping, RequestMappingInfo>>
+          entries,
+      HttpServletRequest request) {
     Set<HttpMethod> declared = new LinkedHashSet<>();
     boolean acceptsAnyMethod = false;
-    for (RequestMappingInfoHandlerMapping mapping : beans) {
-      acceptsAnyMethod |= matchOneMapping(mapping, request, declared);
+    for (var entry : entries) {
+      SupportedMethods one = matchOneMapping(entry, request);
+      declared.addAll(one.declared());
+      acceptsAnyMethod = acceptsAnyMethod || one.acceptsAnyMethod();
     }
     return new SupportedMethods(declared, acceptsAnyMethod);
   }
 
-  /**
-   * Accumulates one mapping's declared methods for the request's path into {@code declared},
-   * returning whether a matching handler names no method at all (and so accepts every one).
-   */
+  /** What one mapping declares for the request's path. Pure: merging is the caller's job. */
   // getUrlPathHelper is deprecated together with the Ant-style matching it is read for; both
   // leave whenever Spring drops that support, and the legacy branch here with them.
   @SuppressWarnings("removal")
-  private static boolean matchOneMapping(
-      RequestMappingInfoHandlerMapping mapping, HttpServletRequest request,
-      Set<HttpMethod> declared) {
+  private static SupportedMethods matchOneMapping(
+      HandlerMappingLookup.Entry<RequestMappingInfoHandlerMapping, RequestMappingInfo> entry,
+      HttpServletRequest request) {
+    Set<HttpMethod> declared = new LinkedHashSet<>();
     boolean acceptsAnyMethod = false;
     // A mapping still on the deprecated Ant matching resolves through the other path form,
     // whose accessor throws when the DispatcherServlet has not populated it — which it never
     // has out here in the filter chain. It is prepared with this mapping's own helper, since
     // helpers can differ per mapping and another's would resolve a different path than this
-    // mapping dispatches with.
-    boolean resolvedHere = request.getAttribute(UrlPathHelper.PATH_ATTRIBUTE) == null;
+    // mapping dispatches with. A mapping on the default parsed patterns never reads it, so
+    // nothing is prepared for one.
+    boolean resolvedHere = !entry.mapping().usesPathPatterns()
+        && request.getAttribute(UrlPathHelper.PATH_ATTRIBUTE) == null;
     if (resolvedHere) {
-      mapping.getUrlPathHelper().resolveAndCacheLookupPath(request);
+      entry.mapping().getUrlPathHelper().resolveAndCacheLookupPath(request);
     }
     try {
-      // Read live, not snapshotted, so runtime-registered mappings are answered for.
-      for (RequestMappingInfo info : mapping.getHandlerMethods().keySet()) {
+      for (RequestMappingInfo info : entry.infos()) {
         RequestCondition<?> patterns = info.getActivePatternsCondition();
         if (patterns.getMatchingCondition(request) == null) {
           continue;
@@ -140,6 +146,6 @@ public class ServletSupportedMethodsResolver {
         request.removeAttribute(UrlPathHelper.PATH_ATTRIBUTE);
       }
     }
-    return acceptsAnyMethod;
+    return new SupportedMethods(declared, acceptsAnyMethod);
   }
 }
