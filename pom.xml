@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.opentmf.security</groupId>
   <artifactId>openid-rbac-security</artifactId>
-  <version>3.0.0</version>
+  <version>3.0.1-SNAPSHOT</version>
   <name>openid-rbac-security</name>
 
   <description>
@@ -434,7 +434,7 @@
     <url>https://github.com/opentmf/openid-rbac-security</url>
     <connection>scm:git:https://github.com/opentmf/openid-rbac-security.git</connection>
     <developerConnection>scm:git:git@github.com:opentmf/openid-rbac-security.git</developerConnection>
-    <tag>openid-rbac-security-3.0.0</tag>
+    <tag>HEAD</tag>
   </scm>
 
 </project>
