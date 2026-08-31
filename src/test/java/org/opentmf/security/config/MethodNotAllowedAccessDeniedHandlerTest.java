@@ -42,7 +42,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void unimplementedMethodOnServedPath_answersMethodNotAllowed() throws Exception {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), false));
 
     handler().handle(request("PUT"), response, DENIED);
 
@@ -54,7 +54,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void implementedMethod_isLeftToTheDelegate() throws Exception {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), false));
 
     handler().handle(request("DELETE"), response, DENIED);
 
@@ -64,7 +64,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void headIsTreatedAsGet_soItIsLeftToTheDelegate() throws Exception {
-    given(new SupportedMethods(methods(HttpMethod.GET), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET), false));
 
     handler().handle(request("HEAD"), response, DENIED);
 
@@ -82,7 +82,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void mappingThatNamesNoMethod_isLeftToTheDelegate() throws Exception {
-    given(new SupportedMethods(Set.of(), true, true));
+    given(new SupportedMethods(Set.of(), true));
 
     handler().handle(request("PUT"), response, DENIED);
 
@@ -92,7 +92,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() throws Exception {
     MockHttpServletRequest request = request("PUT");
-    request.setAttribute(ServletBlacklistDenial.ATTRIBUTE, Boolean.TRUE);
+    request.setAttribute(ServletBlacklistDenial.ATTRIBUTE, request.getRequestURI());
 
     handler().handle(request, response, DENIED);
 
@@ -102,7 +102,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void options_answersOkWithTheOptionsAllowSet() throws Exception {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), false));
 
     handler().handle(request("OPTIONS"), response, DENIED);
 
@@ -112,7 +112,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
 
   @Test
   void optionsThatTheApplicationImplementsItself_isLeftToTheDelegate() throws Exception {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), false));
 
     handler().handle(request("OPTIONS"), response, DENIED);
 

@@ -1064,3 +1064,71 @@ version decision, both made knowingly (§7, §11). What the review added that wa
 written down is the audit consequence: a consumer whose `AccessDeniedHandler` is also where they
 audit denied requests will not see 405/200 responses. That is now stated in the README next to the
 opt-out.
+
+---
+
+## 16. Second review round
+
+Seven acted on, two deferred with reasons. The notable ones:
+
+**A `NoClassDefFoundError` could turn every denial into a 500.** `catch (RuntimeException)` does
+not catch an `Error`, and on a servlet application built without Spring MVC the first touch of a
+handler-mapping type raises `NoClassDefFoundError`. §14.4 concluded such an application "was
+already unsupported" because `.cors(withDefaults())` fails at startup without a
+`CorsConfigurationSource` — **that conclusion was too quick.** A consumer who publishes their own
+`CorsConfigurationSource` bean, which is exactly what a service doing CORS properly does, starts
+fine and then 500s on every denied request. Both resolvers now catch `RuntimeException |
+LinkageError`; `OutOfMemoryError` and friends still propagate. Not reproducible in
+`StackIsolationTest`, because the runner hands Spring already-loaded `Class` objects, so the class
+literal resolves through the app classloader where MVC is present — the fix rests on the reasoning,
+which is why the catch says so in a comment.
+
+**A startup race could disable the management port's semantics permanently.**
+`captureManagementPort` set the port before the context, and the chain matches on the port alone,
+so a denial arriving between the two writes found a null context, snapshotted an empty mapping
+set — and `SingletonSupplier` caches *successes*, so that empty snapshot would stand for the life
+of the process, silently. Two changes: the context is now written first, and a null context
+*throws* rather than returning `Stream.empty()`, so the resolver's catch turns it into a
+one-request `notServed()` and the next denial retries. The throw is what fixes the class of
+problem; the reordering only closes this instance of it.
+
+**The `Allow` rendering did not match Spring's on the OPTIONS path.** Spring renders its 405
+`Allow` with `", "` (`HttpRequestMethodNotSupportedException.getHeaders`) and its OPTIONS `Allow`
+with a bare `","` (`HttpOptionsHandler` → `HttpHeaders.setAllow`). The hand-rolled joiner used
+`", "` for both, so the OPTIONS answer differed by a space from the one the application gives when
+the request is allowed through — a small breach of §5.2's invariant that the differential test
+could not see, since it compares sets. Each branch now uses the framework's own rendering.
+
+**Legacy Ant-matched mappings made the feature silently inert.** `PatternsRequestCondition` is
+deprecated-for-removal but still reachable, and its `getMatchingCondition` calls
+`UrlPathHelper.getResolvedLookupPath`, which throws unless the `DispatcherServlet` populated that
+attribute — never true out in the filter chain. So on such an application every denial threw once
+per scan, was swallowed at debug, and no 405 ever appeared. The servlet resolver now prepares that
+path form alongside the parsed one, and cleans up both.
+
+**The blacklist mark outlived its dispatch.** A servlet request survives an ERROR dispatch, so a
+bare flag set on a blacklisted path was still there when `/error` was re-authorized, labelling
+that denial blacklist-caused. The mark now records the URI it was set for and `denied()` compares.
+
+**Two documentation defects, both about upgrades.** The HEAD change was written up purely as a
+loosening; it also *tightens* — a `HEAD` that previously fell through `other-endpoints` to
+`permitAll` now carries the `GET` rule's roles, and the management section's `authenticated`
+default means a role-restricted management `GET` rule tightens `HEAD` there by default. And
+removing `method: OPTIONS` left anonymous plain-`OPTIONS` probes with no narrow replacement: the
+405/200 handling never applies to anonymous callers by design, so the only substitute is a
+`whitelist` entry, which is strictly broader. Both now stated where an operator will meet them.
+
+### 16.1 Deferred, with reasons
+
+- **Wider de-duplication** across the four configurations (the slot decision, the `getBeansOfType`
+  lookup and its rationale, the resolver skeleton). The observation is right, and the LeakProbe
+  test guards only the servlet management copy of that lookup. It is a structural refactor of
+  code that has just been reworked twice under review; doing it in the same round trades a
+  reviewed diff for an unreviewed one. Worth its own change, with the missing guard tests for the
+  other three copies written first.
+- **Short-circuiting `match()`** once `serves(...)` is true, and warming the snapshot off the
+  Netty event loop. The efficiency argument is fair — the denial path is attacker-reachable — but
+  an early return makes `declared` conditionally complete, and `SupportedMethods` is the input to
+  the one shared decision that exists precisely so the two stacks cannot diverge. Trading a clear
+  invariant for microseconds on a path that is already bounded by the mapping count is the wrong
+  order of priorities while the semantics are this new.

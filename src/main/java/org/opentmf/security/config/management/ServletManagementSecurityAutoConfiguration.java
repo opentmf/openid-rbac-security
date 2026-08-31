@@ -80,8 +80,10 @@ public class ServletManagementSecurityAutoConfiguration {
   @EventListener
   void captureManagementPort(WebServerInitializedEvent event) {
     if (MANAGEMENT_SERVER_NAMESPACE.equals(event.getApplicationContext().getServerNamespace())) {
-      managementPort.set(event.getWebServer().getPort());
+      // Context first, port second. The chain matches on the port alone, so a request that
+      // arrives between these two writes would otherwise find a null context.
       managementContext.set(event.getApplicationContext());
+      managementPort.set(event.getWebServer().getPort());
     }
   }
 
@@ -134,13 +136,18 @@ public class ServletManagementSecurityAutoConfiguration {
    */
   private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
     ApplicationContext context = managementContext.get();
+    if (context == null) {
+      // Not ready yet. Throwing rather than returning an empty stream matters: the resolver
+      // caches its snapshot on first success and SingletonSupplier caches successes but not
+      // failures, so an empty snapshot taken during startup would disable this port's method
+      // semantics for the life of the process. A throw costs one denial and is retried.
+      throw new IllegalStateException("The management context has not been initialized yet.");
+    }
     // getBeansOfType, not getBeanProvider().stream(): the latter walks into ancestor contexts
     // and excludes a parent bean only when the child happens to define one under the same name.
     // The main context's mappings describe the business API, and answering a management-port
     // denial from them would advertise verbs this port does not serve.
-    return (context == null)
-        ? Stream.empty()
-        : context.getBeansOfType(RequestMappingInfoHandlerMapping.class).values().stream();
+    return context.getBeansOfType(RequestMappingInfoHandlerMapping.class).values().stream();
   }
 
   private void applyManagementAuthorization(

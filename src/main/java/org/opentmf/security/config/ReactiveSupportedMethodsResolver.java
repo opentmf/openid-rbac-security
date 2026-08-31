@@ -63,8 +63,11 @@ public class ReactiveSupportedMethodsResolver {
         return SupportedMethods.notServed();
       }
       return match(infos, exchange);
-    } catch (RuntimeException ex) {
-      // A resolution failure must never turn a denial into a server error.
+    } catch (RuntimeException | LinkageError ex) {
+      // A resolution failure must never turn a denial into a server error. LinkageError is in
+      // the list deliberately: on an application built without the matching web stack the first
+      // touch of a handler-mapping type raises NoClassDefFoundError, which is an Error and would
+      // otherwise sail past this and turn every denial into a 500.
       log.debug("Could not resolve supported methods; leaving the denial as it is.", ex);
       return SupportedMethods.notServed();
     }
@@ -73,23 +76,19 @@ public class ReactiveSupportedMethodsResolver {
   private static SupportedMethods match(
       Set<RequestMappingInfo> infos, ServerWebExchange exchange) {
     Set<HttpMethod> declared = new LinkedHashSet<>();
-    boolean pathServed = false;
     boolean acceptsAnyMethod = false;
     for (RequestMappingInfo info : infos) {
       if (info.getPatternsCondition().getMatchingCondition(exchange) == null) {
         continue;
       }
-      pathServed = true;
       Set<RequestMethod> methods = info.getMethodsCondition().getMethods();
       if (methods.isEmpty()) {
         acceptsAnyMethod = true;
       }
       for (RequestMethod method : methods) {
-        declared.add(HttpMethod.valueOf(method.name()));
+        declared.add(method.asHttpMethod());
       }
     }
-    return pathServed
-        ? new SupportedMethods(declared, true, acceptsAnyMethod)
-        : SupportedMethods.notServed();
+    return new SupportedMethods(declared, acceptsAnyMethod);
   }
 }

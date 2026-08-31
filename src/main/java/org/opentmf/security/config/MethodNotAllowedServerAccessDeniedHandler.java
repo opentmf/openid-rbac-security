@@ -30,13 +30,16 @@ public class MethodNotAllowedServerAccessDeniedHandler implements ServerAccessDe
     if (allowed.isEmpty()) {
       return delegate.handle(exchange, exception);
     }
+    boolean options = HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod());
     return Mono.fromRunnable(() -> {
       var response = exchange.getResponse();
-      response.getHeaders().set(HttpHeaders.ALLOW, EndpointRules.allowHeader(allowed.get()));
-      response.setStatusCode(
-          HttpMethod.OPTIONS.equals(exchange.getRequest().getMethod())
-              ? HttpStatus.OK
-              : HttpStatus.METHOD_NOT_ALLOWED);
+      if (options) {
+        // Spring's own OPTIONS answer goes through setAllow; use it so the rendering matches.
+        response.getHeaders().setAllow(allowed.get());
+      } else {
+        response.getHeaders().set(HttpHeaders.ALLOW, EndpointRules.allowHeader(allowed.get()));
+      }
+      response.setStatusCode(options ? HttpStatus.OK : HttpStatus.METHOD_NOT_ALLOWED);
       response.getHeaders().setContentLength(0);
     });
   }

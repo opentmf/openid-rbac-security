@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import org.opentmf.security.model.Endpoint;
 import org.opentmf.security.model.EndpointMethod;
 import org.springframework.http.HttpMethod;
+import org.springframework.util.StringUtils;
 
 /**
  * Shared translation between the configured access rules and the HTTP methods they cover.
@@ -100,19 +101,29 @@ public final class EndpointRules {
   }
 
   /**
-   * Renders an {@code Allow} header value.
+   * Renders the {@code Allow} value for a {@code 405}, the way Spring renders its own:
+   * {@code HttpRequestMethodNotSupportedException.getHeaders()} joins with {@code ", "}.
    *
    * @param methods the methods to advertise, never {@code null}
-   * @return a comma-separated header value
+   * @return the header value
    */
   public static String allowHeader(Set<HttpMethod> methods) {
-    StringBuilder builder = new StringBuilder();
-    for (HttpMethod method : methods) {
-      if (!builder.isEmpty()) {
-        builder.append(", ");
-      }
-      builder.append(method.name());
-    }
-    return builder.toString();
+    return StringUtils.collectionToDelimitedString(methods, ", ");
+  }
+
+  /**
+   * Renders the {@code Allow} value for an {@code OPTIONS} response, the way Spring renders its
+   * own: {@code HttpOptionsHandler} goes through {@code HttpHeaders.setAllow}, which joins with
+   * a bare {@code ","}.
+   *
+   * <p>Yes, the two differ by a space — that is Spring's inconsistency, not ours, and matching
+   * each path exactly is the point: whatever this library answers on a denied request should be
+   * byte-identical to what the application answers when the same request is allowed through.
+   *
+   * @param methods the methods to advertise, never {@code null}
+   * @return the header value
+   */
+  public static String optionsAllowHeader(Set<HttpMethod> methods) {
+    return StringUtils.collectionToCommaDelimitedString(methods);
   }
 }

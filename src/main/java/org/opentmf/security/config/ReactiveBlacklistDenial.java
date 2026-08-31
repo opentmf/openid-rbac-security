@@ -27,7 +27,8 @@ public final class ReactiveBlacklistDenial implements ReactiveAuthorizationManag
   @Override
   public Mono<AuthorizationResult> authorize(
       Mono<Authentication> authentication, AuthorizationContext context) {
-    context.getExchange().getAttributes().put(ATTRIBUTE, Boolean.TRUE);
+    ServerWebExchange exchange = context.getExchange();
+    exchange.getAttributes().put(ATTRIBUTE, exchange.getRequest().getPath().value());
     return Mono.just(new AuthorizationDecision(false));
   }
 
@@ -38,6 +39,6 @@ public final class ReactiveBlacklistDenial implements ReactiveAuthorizationManag
    * @return {@code true} when a blacklist rule made the decision
    */
   public static boolean denied(ServerWebExchange exchange) {
-    return Boolean.TRUE.equals(exchange.getAttributes().get(ATTRIBUTE));
+    return exchange.getRequest().getPath().value().equals(exchange.getAttributes().get(ATTRIBUTE));
   }
 }

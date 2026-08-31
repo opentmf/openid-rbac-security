@@ -14,6 +14,7 @@ import org.springframework.web.servlet.mvc.condition.RequestCondition;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfo;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 import org.springframework.web.util.ServletRequestPathUtils;
+import org.springframework.web.util.UrlPathHelper;
 
 /**
  * Answers what HTTP methods the application actually serves on a given request path, by
@@ -66,6 +67,7 @@ public class ServletSupportedMethodsResolver {
    */
   public SupportedMethods resolve(HttpServletRequest request) {
     boolean parsedHere = false;
+    boolean resolvedHere = false;
     try {
       // Everything that can throw belongs inside: the lazy snapshot can fail on a denial that
       // arrives during context shutdown, and SingletonSupplier does not cache a failure, so it
@@ -78,12 +80,26 @@ public class ServletSupportedMethodsResolver {
       if (parsedHere) {
         ServletRequestPathUtils.parseAndCache(request);
       }
+      // A mapping still on the deprecated Ant matching resolves through the other path form,
+      // whose accessor throws when the DispatcherServlet has not populated it — which it never
+      // has out here in the filter chain. Preparing both means such an application gets the
+      // feature rather than an exception per mapping, swallowed, and no 405 ever.
+      resolvedHere = request.getAttribute(UrlPathHelper.PATH_ATTRIBUTE) == null;
+      if (resolvedHere) {
+        UrlPathHelper.defaultInstance.resolveAndCacheLookupPath(request);
+      }
       return match(infos, request);
-    } catch (RuntimeException ex) {
-      // A resolution failure must never turn a denial into a server error.
+    } catch (RuntimeException | LinkageError ex) {
+      // A resolution failure must never turn a denial into a server error. LinkageError is in
+      // the list deliberately: on a servlet application built without Spring MVC the very first
+      // touch of a handler-mapping type raises NoClassDefFoundError, which is an Error and would
+      // otherwise sail past this and turn every denial into a 500.
       log.debug("Could not resolve supported methods; leaving the denial as it is.", ex);
       return SupportedMethods.notServed();
     } finally {
+      if (resolvedHere) {
+        request.removeAttribute(UrlPathHelper.PATH_ATTRIBUTE);
+      }
       if (parsedHere) {
         ServletRequestPathUtils.clearParsedRequestPath(request);
       }
@@ -93,24 +109,20 @@ public class ServletSupportedMethodsResolver {
   private static SupportedMethods match(
       Set<RequestMappingInfo> infos, HttpServletRequest request) {
     Set<HttpMethod> declared = new LinkedHashSet<>();
-    boolean pathServed = false;
     boolean acceptsAnyMethod = false;
     for (RequestMappingInfo info : infos) {
       RequestCondition<?> patterns = info.getActivePatternsCondition();
       if (patterns.getMatchingCondition(request) == null) {
         continue;
       }
-      pathServed = true;
       Set<RequestMethod> methods = info.getMethodsCondition().getMethods();
       if (methods.isEmpty()) {
         acceptsAnyMethod = true;
       }
       for (RequestMethod method : methods) {
-        declared.add(HttpMethod.valueOf(method.name()));
+        declared.add(method.asHttpMethod());
       }
     }
-    return pathServed
-        ? new SupportedMethods(declared, true, acceptsAnyMethod)
-        : SupportedMethods.notServed();
+    return new SupportedMethods(declared, acceptsAnyMethod);
   }
 }

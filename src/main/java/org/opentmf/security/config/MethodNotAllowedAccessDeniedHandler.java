@@ -50,11 +50,14 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
       delegate.handle(request, response, exception);
       return;
     }
-    response.setHeader(HttpHeaders.ALLOW, EndpointRules.allowHeader(allowed.get()));
+    boolean options = HttpMethod.OPTIONS.matches(request.getMethod());
+    response.setHeader(
+        HttpHeaders.ALLOW,
+        options
+            ? EndpointRules.optionsAllowHeader(allowed.get())
+            : EndpointRules.allowHeader(allowed.get()));
     response.setStatus(
-        HttpMethod.OPTIONS.matches(request.getMethod())
-            ? HttpServletResponse.SC_OK
-            : HttpServletResponse.SC_METHOD_NOT_ALLOWED);
+        options ? HttpServletResponse.SC_OK : HttpServletResponse.SC_METHOD_NOT_ALLOWED);
     response.setContentLength(0);
   }
 

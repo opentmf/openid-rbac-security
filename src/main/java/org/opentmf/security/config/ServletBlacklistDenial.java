@@ -35,17 +35,23 @@ public final class ServletBlacklistDenial
   @Override
   public AuthorizationResult authorize(
       Supplier<? extends Authentication> authentication, RequestAuthorizationContext context) {
-    context.getRequest().setAttribute(ATTRIBUTE, Boolean.TRUE);
+    HttpServletRequest request = context.getRequest();
+    request.setAttribute(ATTRIBUTE, request.getRequestURI());
     return new AuthorizationDecision(false);
   }
 
   /**
    * Whether the blacklist is what denied this request.
    *
+   * <p>The mark records the URI it was set for, not just a flag. A servlet request outlives one
+   * dispatch — an ERROR dispatch to {@code /error} is re-authorized on the same request object —
+   * so a bare flag would still be there, and would label that second denial as blacklist-caused
+   * although no blacklist rule matched the path it was actually deciding.
+   *
    * @param request the request being answered, never {@code null}
-   * @return {@code true} when a blacklist rule made the decision
+   * @return {@code true} when a blacklist rule denied this dispatch's own path
    */
   public static boolean denied(HttpServletRequest request) {
-    return Boolean.TRUE.equals(request.getAttribute(ATTRIBUTE));
+    return request.getRequestURI().equals(request.getAttribute(ATTRIBUTE));
   }
 }

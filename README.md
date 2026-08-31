@@ -386,6 +386,14 @@ Spring MVC and WebFlux both serve a `HEAD` request from the handler mapped to `G
 showed up as 403s from monitoring agents, reverse proxies and health checkers. This is not
 optional and there is no property to turn it off.
 
+> **Upgrading: this tightens as well as loosens.** Because a `GET` rule never matched `HEAD`
+> before, a `HEAD` request fell through to `other-endpoints` — served anonymously under `allow`,
+> or accepted with any valid token under `authenticated`. It now carries the `GET` rule's roles,
+> so a probe that relied on that fall-through gets **401** (anonymous) or **403** (token without
+> the role). The management section defaults to `other-endpoints: authenticated`, so a
+> role-restricted management `GET` rule tightens `HEAD` there by default. Give the probe the
+> role, or `whitelist` the path.
+
 Method values are matched case-insensitively when binding, so `get` and `GET` mean the same
 thing. **Before 2.4.0 they did not:** the value bound through `HttpMethod.valueOf`, which
 preserves case, and the request matchers compare verbs by exact string — so a lowercase rule
@@ -441,12 +449,21 @@ Details worth knowing:
 
 ### CORS pre-flight is a different problem
 
-`OPTIONS` cannot be named in the access rules, and does not need to be. A CORS pre-flight is
-answered before the security chain sees it when CORS is configured, and when it is *not*
-configured no access rule can help: a browser needs `Access-Control-Allow-Origin`, which only a
-`CorsConfigurationSource` bean (or MVC `addCorsMappings`) can produce. **If your service is
-called from a browser on another origin, configure CORS** — this library will not make
-pre-flight work, on either stack.
+`OPTIONS` cannot be named in the access rules, and for a CORS pre-flight it does not need to be.
+A pre-flight is answered before the security chain sees it when CORS is configured, and when it
+is *not* configured no access rule can help: a browser needs `Access-Control-Allow-Origin`,
+which only a `CorsConfigurationSource` bean (or MVC `addCorsMappings`) can produce. **If your
+service is called from a browser on another origin, configure CORS** — this library will not
+make pre-flight work, on either stack.
+
+> **The one case with no direct replacement: anonymous plain `OPTIONS`.** A gateway or health
+> checker that probes with `OPTIONS` and *no token* used to be served by an
+> `allowed-endpoints` entry for `OPTIONS`. That entry no longer binds, and the 405/200 handling
+> above never applies to an anonymous caller — those denials go to the entry point as `401`, by
+> design, so that the method surface stays behind a token. CORS configuration is irrelevant to a
+> non-browser probe. The only replacement is a `whitelist` entry for the path, which is
+> **strictly broader**: it opens every method there anonymously. If that is too broad, the probe
+> has to present a token. Anonymous `OPTIONS` is deliberately not supported.
 
 The two stacks also differ here, which is worth knowing when comparing them. On servlet, Spring's
 `CorsFilter` terminates a pre-flight before the security chain runs, so an unconfigured service

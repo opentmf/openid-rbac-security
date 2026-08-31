@@ -44,7 +44,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void unimplementedMethodOnServedPath_answersMethodNotAllowed() {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), false));
     ServerWebExchange exchange = exchange(HttpMethod.PUT);
 
     StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
@@ -57,7 +57,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void implementedMethod_isLeftToTheDelegate() {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), false));
 
     StepVerifier.create(handler().handle(exchange(HttpMethod.DELETE), DENIED))
         .verifyComplete();
@@ -67,7 +67,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void headIsTreatedAsGet_soItIsLeftToTheDelegate() {
-    given(new SupportedMethods(methods(HttpMethod.GET), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET), false));
 
     StepVerifier.create(handler().handle(exchange(HttpMethod.HEAD), DENIED))
         .verifyComplete();
@@ -87,7 +87,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void mappingThatNamesNoMethod_isLeftToTheDelegate() {
-    given(new SupportedMethods(Set.of(), true, true));
+    given(new SupportedMethods(Set.of(), true));
 
     StepVerifier.create(handler().handle(exchange(HttpMethod.PUT), DENIED))
         .verifyComplete();
@@ -98,7 +98,8 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() {
     ServerWebExchange exchange = exchange(HttpMethod.PUT);
-    exchange.getAttributes().put(ReactiveBlacklistDenial.ATTRIBUTE, Boolean.TRUE);
+    exchange.getAttributes().put(
+        ReactiveBlacklistDenial.ATTRIBUTE, exchange.getRequest().getPath().value());
 
     StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
 
@@ -108,7 +109,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void options_answersOkWithTheOptionsAllowSet() {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), false));
     ServerWebExchange exchange = exchange(HttpMethod.OPTIONS);
 
     StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
@@ -119,7 +120,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void optionsThatTheApplicationImplementsItself_isLeftToTheDelegate() {
-    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), true, false));
+    given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), false));
 
     StepVerifier.create(handler().handle(exchange(HttpMethod.OPTIONS), DENIED))
         .verifyComplete();
