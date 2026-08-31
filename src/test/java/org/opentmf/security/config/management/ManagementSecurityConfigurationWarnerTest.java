@@ -12,12 +12,12 @@ import java.util.Map;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.opentmf.security.model.EndpointMethod;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.SecureEndpoint;
 import org.slf4j.LoggerFactory;
 import org.springframework.core.env.Environment;
-import org.springframework.http.HttpMethod;
 import org.springframework.mock.env.MockEnvironment;
 
 class ManagementSecurityConfigurationWarnerTest {
@@ -166,7 +166,7 @@ class ManagementSecurityConfigurationWarnerTest {
 
   private static SecureEndpoint secureEndpoint(String path) {
     SecureEndpoint endpoint = new SecureEndpoint();
-    endpoint.setMethod(HttpMethod.GET);
+    endpoint.setMethod(EndpointMethod.GET);
     endpoint.setPath(path);
     endpoint.setRoles(new String[] {"admin"});
     return endpoint;

@@ -3,15 +3,18 @@ package org.opentmf.security.config;
 import static org.opentmf.security.config.UniqueBeanResolver.resolveUnique;
 import static org.springframework.security.config.Customizer.withDefaults;
 
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
+import org.opentmf.security.model.UnmatchedMethodResponse;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableReactiveMethodSecurity;
 import org.springframework.security.config.annotation.web.reactive.EnableWebFluxSecurity;
@@ -23,11 +26,15 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.FormLog
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
+import org.springframework.security.oauth2.server.resource.web.access.server.BearerTokenServerAccessDeniedHandler;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.util.CollectionUtils;
+import org.springframework.web.reactive.result.method.RequestMappingInfoHandlerMapping;
+import org.springframework.web.util.pattern.PathPattern;
+import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * OpenTMF Reactive Security configures according to the supplied OpenTmfSecurityProperties.
@@ -46,6 +53,7 @@ public class ReactiveSecurityAutoConfiguration {
   private final ReactiveJwtSupport reactiveJwtSupport;
   private final ObjectProvider<ServerAuthenticationEntryPoint> authenticationEntryPoints;
   private final ObjectProvider<ServerAccessDeniedHandler> accessDeniedHandlers;
+  private final ObjectProvider<RequestMappingInfoHandlerMapping> handlerMappings;
 
   @Bean
   SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
@@ -79,8 +87,25 @@ public class ReactiveSecurityAutoConfiguration {
       handling.authenticationEntryPoint(entryPoint);
     }
     if (accessDeniedHandler != null) {
-      handling.accessDeniedHandler(accessDeniedHandler);
+      handling.accessDeniedHandler(methodAware(accessDeniedHandler));
     }
+  }
+
+  /**
+   * Decorates a denied-request handler so that a request for a method the application does not
+   * serve on that path is answered {@code 405} rather than {@code 403}. Returns the handler
+   * untouched when {@code opentmf.security.unmatched-method-response} is {@code DENY}.
+   */
+  private ServerAccessDeniedHandler methodAware(ServerAccessDeniedHandler delegate) {
+    if (openTmfSecurityProperties.getUnmatchedMethodResponse()
+        != UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      return delegate;
+    }
+    List<PathPattern> blacklist = openTmfSecurityProperties.getBlacklist().stream()
+        .map(PathPatternParser.defaultInstance::parse)
+        .toList();
+    return new MethodNotAllowedServerAccessDeniedHandler(
+        delegate, new ReactiveSupportedMethodsResolver(handlerMappings::stream), blacklist);
   }
 
   /**
@@ -97,10 +122,31 @@ public class ReactiveSecurityAutoConfiguration {
       if (entryPoint != null) {
         resourceServer.authenticationEntryPoint(entryPoint);
       }
-      if (accessDeniedHandler != null) {
-        resourceServer.accessDeniedHandler(accessDeniedHandler);
-      }
+      configureDeniedHandler(resourceServer, accessDeniedHandler);
     };
+  }
+
+  /**
+   * Sets the denied-request handler on the bearer-token path. Spring routes every denial of a
+   * request carrying a bearer token here rather than to the global handler, so the {@code 405}
+   * decoration has to be applied on this path too — every authenticated caller of this library
+   * carries one. When there is nothing to decorate and no consumer handler, the slot is left
+   * alone so Spring's own default keeps applying.
+   */
+  private void configureDeniedHandler(
+      OAuth2ResourceServerSpec resourceServer, ServerAccessDeniedHandler consumerHandler) {
+    boolean answersMethodNotAllowed = openTmfSecurityProperties.getUnmatchedMethodResponse()
+        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
+    if (!answersMethodNotAllowed) {
+      if (consumerHandler != null) {
+        resourceServer.accessDeniedHandler(consumerHandler);
+      }
+      return;
+    }
+    ServerAccessDeniedHandler delegate = (consumerHandler != null)
+        ? consumerHandler
+        : new BearerTokenServerAccessDeniedHandler();
+    resourceServer.accessDeniedHandler(methodAware(delegate));
   }
 
   private Customizer<AuthorizeExchangeSpec> applyOpenTmfSecurityDefinitions() {
@@ -124,7 +170,9 @@ public class ReactiveSecurityAutoConfiguration {
 
   private void configureAllowedEndpoints(AuthorizeExchangeSpec exchanges) {
     for (var allow : openTmfSecurityProperties.getAllowedEndpoints()) {
-      exchanges.pathMatchers(allow.getMethod(), allow.getPath()).permitAll();
+      for (HttpMethod method : EndpointRules.httpMethodsFor(allow)) {
+        exchanges.pathMatchers(method, allow.getPath()).permitAll();
+      }
     }
   }
 
@@ -144,8 +192,10 @@ public class ReactiveSecurityAutoConfiguration {
 
   private void configureSecureEndpoints(AuthorizeExchangeSpec exchanges) {
     for (var restricted : openTmfSecurityProperties.getSecureEndpoints()) {
-      exchanges.pathMatchers(restricted.getMethod(), restricted.getPath())
-          .hasAnyAuthority(restricted.getRoles());
+      for (HttpMethod method : EndpointRules.httpMethodsFor(restricted)) {
+        exchanges.pathMatchers(method, restricted.getPath())
+            .hasAnyAuthority(restricted.getRoles());
+      }
     }
   }
 }

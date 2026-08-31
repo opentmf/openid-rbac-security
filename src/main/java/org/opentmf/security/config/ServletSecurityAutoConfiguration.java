@@ -4,15 +4,18 @@ import static org.opentmf.security.config.UniqueBeanResolver.resolveUnique;
 import static org.springframework.security.config.Customizer.withDefaults;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
+import org.opentmf.security.model.UnmatchedMethodResponse;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -23,10 +26,14 @@ import org.springframework.security.config.annotation.web.configurers.ExceptionH
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.util.CollectionUtils;
+import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 
 /**
  * OpenTMF Web Security configures according to the supplied OpenTmfSecurityProperties.
@@ -45,6 +52,8 @@ public class ServletSecurityAutoConfiguration {
   private final ServletJwtSupport servletJwtSupport;
   private final ObjectProvider<AuthenticationEntryPoint> authenticationEntryPoints;
   private final ObjectProvider<AccessDeniedHandler> accessDeniedHandlers;
+  private final ObjectProvider<RequestMappingInfoHandlerMapping> handlerMappings;
+  private final ObjectProvider<PathPatternRequestMatcher.Builder> requestMatcherBuilders;
 
   @Bean
   SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) {
@@ -79,8 +88,27 @@ public class ServletSecurityAutoConfiguration {
       handling.authenticationEntryPoint(entryPoint);
     }
     if (accessDeniedHandler != null) {
-      handling.accessDeniedHandler(accessDeniedHandler);
+      handling.accessDeniedHandler(methodAware(accessDeniedHandler));
     }
+  }
+
+  /**
+   * Decorates a denied-request handler so that a request for a method the application does not
+   * serve on that path is answered {@code 405} rather than {@code 403}. Returns the handler
+   * untouched when {@code opentmf.security.unmatched-method-response} is {@code DENY}.
+   */
+  private AccessDeniedHandler methodAware(AccessDeniedHandler delegate) {
+    if (openTmfSecurityProperties.getUnmatchedMethodResponse()
+        != UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      return delegate;
+    }
+    PathPatternRequestMatcher.Builder builder =
+        requestMatcherBuilders.getIfAvailable(PathPatternRequestMatcher::withDefaults);
+    List<RequestMatcher> blacklist = openTmfSecurityProperties.getBlacklist().stream()
+        .map(path -> (RequestMatcher) builder.matcher(path))
+        .toList();
+    return new MethodNotAllowedAccessDeniedHandler(
+        delegate, new ServletSupportedMethodsResolver(handlerMappings::stream), blacklist);
   }
 
   private void applyOpenTmfSecurityDefinitions(
@@ -120,16 +148,20 @@ public class ServletSecurityAutoConfiguration {
 
   private void configureAllowedEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    openTmfSecurityProperties.getAllowedEndpoints().forEach(matcher ->
-        requests.requestMatchers(matcher.getMethod(), matcher.getPath())
-            .permitAll());
+    openTmfSecurityProperties.getAllowedEndpoints().forEach(endpoint -> {
+      for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {
+        requests.requestMatchers(method, endpoint.getPath()).permitAll();
+      }
+    });
   }
 
   private void configureSecureEndpoints(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
-    openTmfSecurityProperties.getSecureEndpoints().forEach(matcher ->
-        requests.requestMatchers(matcher.getMethod(), matcher.getPath())
-            .hasAnyAuthority(matcher.getRoles()));
+    openTmfSecurityProperties.getSecureEndpoints().forEach(endpoint -> {
+      for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {
+        requests.requestMatchers(method, endpoint.getPath()).hasAnyAuthority(endpoint.getRoles());
+      }
+    });
   }
 
   /**
@@ -147,8 +179,28 @@ public class ServletSecurityAutoConfiguration {
     if (entryPoint != null) {
       oauth2.authenticationEntryPoint(entryPoint);
     }
-    if (accessDeniedHandler != null) {
-      oauth2.accessDeniedHandler(accessDeniedHandler);
+    configureDeniedHandler(oauth2, accessDeniedHandler);
+  }
+
+  /**
+   * Sets the denied-request handler on the bearer-token path. Spring routes every denial of a
+   * request carrying a bearer token here rather than to the global handler, so the {@code 405}
+   * decoration has to be applied on this path too — every authenticated caller of this library
+   * carries one. When there is nothing to decorate and no consumer handler, the slot is left
+   * alone so Spring's own default keeps applying.
+   */
+  private void configureDeniedHandler(
+      OAuth2ResourceServerConfigurer<HttpSecurity> oauth2, AccessDeniedHandler consumerHandler) {
+    boolean answersMethodNotAllowed = openTmfSecurityProperties.getUnmatchedMethodResponse()
+        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
+    if (!answersMethodNotAllowed) {
+      if (consumerHandler != null) {
+        oauth2.accessDeniedHandler(consumerHandler);
+      }
+      return;
     }
+    AccessDeniedHandler delegate =
+        (consumerHandler != null) ? consumerHandler : new BearerTokenAccessDeniedHandler();
+    oauth2.accessDeniedHandler(methodAware(delegate));
   }
 }

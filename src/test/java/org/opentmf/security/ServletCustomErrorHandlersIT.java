@@ -3,6 +3,7 @@ package org.opentmf.security;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.opentmf.security.util.TokenUtil.EXPIRED_TOKEN;
 import static org.opentmf.security.util.TokenUtil.READ_TOKEN;
+import static org.opentmf.security.util.TokenUtil.WRITE_TOKEN;
 
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -120,6 +121,37 @@ class ServletCustomErrorHandlersIT {
         restTemplate.getForEntity(main("/protectedButNotConfigured"), String.class);
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.UNAUTHORIZED);
     assertThat(response.getBody()).isEqualTo(CUSTOM_401_BODY);
+  }
+
+  /**
+   * The consumer's handler still owns every denial that is genuinely about authorization: the
+   * method is implemented, the caller simply lacks the role.
+   */
+  @Test
+  void implementedMethodWithoutTheRole_stillRendersCustom403Body() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.setBearerAuth(READ_TOKEN);
+    ResponseEntity<String> response = restTemplate.exchange(
+        main("/car/Mercedes"), HttpMethod.DELETE, new HttpEntity<>(headers), String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+    assertThat(response.getBody()).isEqualTo(CUSTOM_403_BODY);
+  }
+
+  /**
+   * A method the application does not implement is not an authorization question, so the library
+   * answers it and the consumer's handler is deliberately bypassed. Also the only place the
+   * {@code 405} path is exercised on a real server behind a servlet context path, which the
+   * request-path parsing has to strip before matching.
+   */
+  @Test
+  void unimplementedMethod_isAnsweredByTheLibraryAndBypassesTheCustomHandler() {
+    HttpHeaders headers = new HttpHeaders();
+    headers.setBearerAuth(WRITE_TOKEN);
+    ResponseEntity<String> response = restTemplate.exchange(
+        main("/car/Mercedes"), HttpMethod.PUT, new HttpEntity<>(headers), String.class);
+    assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+    assertThat(response.getHeaders().getFirst(HttpHeaders.ALLOW)).isNotNull();
+    assertThat(response.getBody()).isNotEqualTo(CUSTOM_403_BODY);
   }
 
   @Test

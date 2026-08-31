@@ -95,11 +95,12 @@ All properties live under the `opentmf.security` prefix.
 | `user-claim` | `sub` | JWT claim to use as the principal (user identifier). |
 | `fallback-user-claims` | *(empty)* | Ordered list of fallback claims when `user-claim` is absent. Useful for `client_credentials` tokens. |
 | `authorities-claim` | `roles` | JWT claim containing the user's roles/authorities. |
-| `secure-endpoints` | *(empty)* | List of `{method, path, roles}` entries requiring specific authorities. |
-| `allowed-endpoints` | *(empty)* | List of `{method, path}` entries that bypass security. |
+| `secure-endpoints` | *(empty)* | List of `{method, path, roles}` entries requiring specific authorities. `method` is one of `GET`, `POST`, `PUT`, `PATCH`, `DELETE`. |
+| `allowed-endpoints` | *(empty)* | List of `{method, path}` entries that bypass security. Same five methods. |
 | `whitelist` | *(empty)* | List of path patterns that bypass security for all HTTP methods. |
 | `blacklist` | *(empty)* | List of path patterns denied for all HTTP methods. |
 | `other-endpoints` | `deny` | Catch-all policy for unmatched requests: `allow` (permit anonymously), `deny` (reject — historical default, preserves backward compatibility), `authenticated` (require any valid JWT). |
+| `unmatched-method-response` | `method-not-allowed` | How to answer a denied request whose path the application serves but not with that HTTP method: `method-not-allowed` (405 with an `Allow` header) or `deny` (403, as before 2.4.0). See [HTTP method semantics](#http-method-semantics). |
 
 ### Nested claims
 
@@ -357,6 +358,89 @@ Convergence happens at the renderer instead of the dispatch path — same single
 ### Management port is not affected
 
 The management-port chain deliberately keeps the RFC 6750 defaults (status + `WWW-Authenticate`, empty body): it serves probes and scrapers that read status codes, not bodies. Custom entry points / denied handlers apply to the main port only.
+
+## HTTP method semantics
+
+Access rules are deployment configuration; the controllers are the code. When the two disagree
+about *why* a request cannot be served, this library answers from the code, because that is what
+the caller is actually asking about.
+
+### `GET` rules cover `HEAD`
+
+A rule written for `GET` is registered for `HEAD` as well, with the same roles:
+
+```yaml
+opentmf:
+  security:
+    secure-endpoints:
+      - method: GET          # HEAD /car/** is covered by this rule too
+        path: /car/**
+        roles: [read]
+```
+
+Spring MVC and WebFlux both serve a `HEAD` request from the handler mapped to `GET`, so before
+2.4.0 the security chain refused requests the framework was perfectly willing to answer — which
+showed up as 403s from monitoring agents, reverse proxies and health checkers. This is not
+optional and there is no property to turn it off.
+
+For the same reason `method` accepts only **`GET`, `POST`, `PUT`, `PATCH`, `DELETE`**. `HEAD` is
+implied by `GET`; allowing it to be named separately would let a configuration declare different
+roles for the two, of which only the first registered would ever apply. `OPTIONS` and `TRACE` are
+rejected too — see below.
+
+### 405 instead of 403 for a method the application does not implement
+
+A caller who sends `PUT` to a resource that only supports `GET` and `DELETE` gets:
+
+```
+HTTP/1.1 405 Method Not Allowed
+Allow: GET, DELETE
+```
+
+rather than a `403` implying they lack permission for something that does not exist. A plain
+`OPTIONS` request is answered `200 OK` with the same header. The advertised methods come from the
+application's handler mappings — the same ones Spring dispatches with — so the header says what
+the resource genuinely supports.
+
+**A method the application *does* implement stays `403`.** If `DELETE /car/{id}` exists in code
+and the access rules withhold it, that is an authorization answer and it is left alone.
+Relabelling it `405` would tell the caller the endpoint does not exist when it does.
+
+Set `unmatched-method-response: deny` to answer every denial with `403` as releases before 2.4.0
+did — for a deployment that would rather not disclose which methods it implements, or a consumer
+whose clients depend on the old status.
+
+Details worth knowing:
+
+- **Never without a token.** An anonymous request keeps its `401`. The method surface is only
+  ever disclosed to a caller who already authenticated, and who can already read the OAS.
+- **`Allow` describes the resource, not the caller.** It is not filtered by the caller's roles,
+  which is what RFC 9110 specifies.
+- **Blacklisted paths answer `403` uniformly**, with no `Allow` header. An explicitly closed path
+  discloses nothing about itself.
+- **The response has no body.** A consumer-supplied `AccessDeniedHandler` is not invoked for
+  these responses; it still handles every other denial, including the `403` cases above.
+- **Only annotation-based controllers are consulted.** A path served solely by a functional route
+  or a resource handler keeps answering `403`.
+- **Both ports.** `opentmf.security.management.unmatched-method-response` is the management-port
+  twin, with the same default. It rarely comes into play while `management.other-endpoints`
+  keeps its `authenticated` default, since unmatched requests then reach the actuator, which
+  answers for itself.
+
+### CORS pre-flight is a different problem
+
+`OPTIONS` cannot be named in the access rules, and does not need to be. A CORS pre-flight is
+answered before the security chain sees it when CORS is configured, and when it is *not*
+configured no access rule can help: a browser needs `Access-Control-Allow-Origin`, which only a
+`CorsConfigurationSource` bean (or MVC `addCorsMappings`) can produce. **If your service is
+called from a browser on another origin, configure CORS** — this library will not make
+pre-flight work, on either stack.
+
+The two stacks also differ here, which is worth knowing when comparing them. On servlet, Spring's
+`CorsFilter` terminates a pre-flight before the security chain runs, so an unconfigured service
+answers `200` with no CORS headers. On reactive no CORS filter is installed at all without a
+`CorsConfigurationSource` bean, so the pre-flight reaches the security chain. Configuring CORS
+makes both behave the same.
 
 ## Changelog
 

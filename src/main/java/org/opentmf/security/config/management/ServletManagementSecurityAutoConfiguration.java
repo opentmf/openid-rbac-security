@@ -3,31 +3,47 @@ package org.opentmf.security.config.management;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 import jakarta.servlet.http.HttpServletRequest;
+import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.opentmf.security.config.EndpointRules;
+import org.opentmf.security.config.MethodNotAllowedAccessDeniedHandler;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletJwtSupport;
+import org.opentmf.security.config.ServletSupportedMethodsResolver;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
+import org.opentmf.security.model.UnmatchedMethodResponse;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.web.server.context.WebServerInitializedEvent;
 import org.springframework.context.annotation.Bean;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
 import org.springframework.security.config.annotation.web.configurers.FormLoginConfigurer;
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
+import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
+import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 
 /**
  * Registers a JWT-authenticated {@link SecurityFilterChain} for the management port into the
@@ -61,12 +77,15 @@ public class ServletManagementSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties properties;
   private final ServletJwtSupport servletJwtSupport;
+  private final ObjectProvider<PathPatternRequestMatcher.Builder> requestMatcherBuilders;
   private final AtomicInteger managementPort = new AtomicInteger(-1);
+  private final AtomicReference<ApplicationContext> managementContext = new AtomicReference<>();
 
   @EventListener
   void captureManagementPort(WebServerInitializedEvent event) {
     if (MANAGEMENT_SERVER_NAMESPACE.equals(event.getApplicationContext().getServerNamespace())) {
       managementPort.set(event.getWebServer().getPort());
+      managementContext.set(event.getApplicationContext());
     }
   }
 
@@ -82,12 +101,51 @@ public class ServletManagementSecurityAutoConfiguration {
         .httpBasic(HttpBasicConfigurer::disable)
         .logout(LogoutConfigurer::disable)
         .authorizeHttpRequests(this::applyManagementAuthorization)
-        .oauth2ResourceServer(servletJwtSupport::apply)
+        .oauth2ResourceServer(this::configureResourceServer)
         .build();
   }
 
   private boolean isManagementPortRequest(HttpServletRequest request) {
     return request.getLocalPort() == managementPort.get();
+  }
+
+  private void configureResourceServer(OAuth2ResourceServerConfigurer<HttpSecurity> oauth2) {
+    servletJwtSupport.apply(oauth2);
+    if (properties.getManagement().getUnmatchedMethodResponse()
+        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
+      oauth2.accessDeniedHandler(methodAware(new BearerTokenAccessDeniedHandler()));
+    }
+  }
+
+  /**
+   * Decorates the denied-request handler so that a request for a method the actuator does not
+   * serve on that path is answered {@code 405} rather than {@code 403}, honouring the
+   * management section's own {@code unmatched-method-response}.
+   */
+  private AccessDeniedHandler methodAware(AccessDeniedHandler delegate) {
+    PathPatternRequestMatcher.Builder builder =
+        requestMatcherBuilders.getIfAvailable(PathPatternRequestMatcher::withDefaults);
+    List<RequestMatcher> blacklist = properties.getManagement().getBlacklist().stream()
+        .map(path -> (RequestMatcher) builder.matcher(path))
+        .toList();
+    return new MethodNotAllowedAccessDeniedHandler(
+        delegate, new ServletSupportedMethodsResolver(this::managementHandlerMappings), blacklist);
+  }
+
+  /**
+   * The handler mappings of the management child context — the one that actually dispatches
+   * management-port requests. This chain lives in the main context (see the class javadoc), so
+   * the main context's own mappings are the wrong ones to consult: they describe the business
+   * API, not the actuator, and answering a management-port request from them would advertise
+   * methods that port does not serve. The child context is captured from the same
+   * {@link WebServerInitializedEvent} the port comes from, and read only on the first denial,
+   * long after that event.
+   */
+  private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
+    ApplicationContext context = managementContext.get();
+    return (context == null)
+        ? Stream.empty()
+        : context.getBeanProvider(RequestMappingInfoHandlerMapping.class).stream();
   }
 
   private void applyManagementAuthorization(
@@ -96,12 +154,16 @@ public class ServletManagementSecurityAutoConfiguration {
     Management management = properties.getManagement();
     management.getBlacklist().forEach(path -> requests.requestMatchers(path).denyAll());
     management.getWhitelist().forEach(path -> requests.requestMatchers(path).permitAll());
-    management.getAllowedEndpoints().forEach(endpoint -> requests
-        .requestMatchers(endpoint.getMethod(), endpoint.getPath())
-        .permitAll());
-    management.getSecureEndpoints().forEach(endpoint -> requests
-        .requestMatchers(endpoint.getMethod(), endpoint.getPath())
-        .hasAnyAuthority(endpoint.getRoles()));
+    management.getAllowedEndpoints().forEach(endpoint -> {
+      for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {
+        requests.requestMatchers(method, endpoint.getPath()).permitAll();
+      }
+    });
+    management.getSecureEndpoints().forEach(endpoint -> {
+      for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {
+        requests.requestMatchers(method, endpoint.getPath()).hasAnyAuthority(endpoint.getRoles());
+      }
+    });
     OtherEndpoints policy = management.getOtherEndpoints();
     switch (policy) {
       case ALLOW -> requests.anyRequest().permitAll();

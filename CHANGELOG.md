@@ -2,6 +2,31 @@
 
 All notable changes to this project will be documented in this file.
 
+## [2.4.0] - 2026-08-31
+
+This release changes how a denied request is answered when the HTTP method, rather than the caller's authority, is what makes it unservable. **Read the Removed section before upgrading: a configuration that names `HEAD`, `OPTIONS` or `TRACE` in `secure-endpoints` or `allowed-endpoints` will no longer start.**
+
+### Removed
+- **`opentmf.security.secure-endpoints[].method` and `allowed-endpoints[].method` now accept only `GET`, `POST`, `PUT`, `PATCH` and `DELETE`** (on the management section too). Any other value — `HEAD`, `OPTIONS`, `TRACE`, `CONNECT` — fails to bind and the application does not start.
+  - **If you have `method: HEAD` entries, delete them.** A `GET` rule now covers `HEAD` automatically, with the same roles (see Changed). Keeping a separate `HEAD` entry was never reliable anyway: the two rules would both match, and Spring Security applies the first registered one, so the second silently had no effect.
+  - **If you have `method: OPTIONS` entries, delete them and configure CORS instead.** An `OPTIONS` rule cannot make a browser pre-flight succeed — that needs `Access-Control-Allow-Origin` headers, which only a `CorsConfigurationSource` bean or MVC `addCorsMappings` can produce. Plain `OPTIONS` requests are now answered from the application's own handler mappings without needing a rule.
+  - These two are the entries most likely to exist, because they are the natural workarounds for the two defects this release fixes.
+
+### Changed
+- **A `GET` access rule now also covers `HEAD` on the same path, with the same roles.** Spring MVC and WebFlux both serve `HEAD` from the handler mapped to `GET`, so the security chain was refusing requests the framework would have answered — every `HEAD` probe from a monitoring agent, reverse proxy, health checker or link checker against a `GET`-listed endpoint returned `403`. There is no opt-out; a rule that grants `GET` cannot meaningfully withhold `HEAD`, which returns the same headers and no body.
+- **A denied request for a method the application does not implement now answers `405 Method Not Allowed` with an `Allow` header, instead of `403`.** Sending `PUT` to a resource that supports only `GET` and `DELETE` is not an authorization failure, and answering `403` told callers they lacked permission for something that does not exist. Governed by the new `unmatched-method-response` property, which defaults to `method-not-allowed`; set it to `deny` to restore the previous uniform `403`.
+  - **A method the application *does* implement still answers `403`.** If the code has `DELETE /car/{id}` and the access rules withhold it, that is a genuine authorization answer and is unchanged. Only methods with no handler behind them are relabelled.
+  - **An anonymous request still answers `401`.** The set of methods an application implements is only ever disclosed to a caller who has already authenticated.
+  - Blacklisted paths answer `403` uniformly with no `Allow` header, disclosing nothing about what they implement.
+  - The `405` response has no body, and a consumer-supplied `AccessDeniedHandler` is not invoked for it. That handler still renders every other denial, including the `403` cases above.
+- **A plain `OPTIONS` request on a served path now answers `200 OK` with an `Allow` header** rather than `403`, matching what Spring answers when the request reaches the dispatcher. This is not CORS: a pre-flight still requires the service to configure a `CorsConfigurationSource`.
+
+### Added
+- **`opentmf.security.unmatched-method-response`** and its management-port twin `opentmf.security.management.unmatched-method-response`: `method-not-allowed` (default) or `deny`. Both sections default the same way.
+- The advertised `Allow` set is read from the application's own handler mappings — the same `RequestMappingInfo` objects Spring dispatches with — so it reports what the code actually supports rather than what the access rules happen to list. Access rules are deployment configuration and can omit an endpoint that exists or name one that does not; `Allow` is defined as the methods the *resource* supports. Only annotation-based controllers contribute: a path served solely by a functional route or resource handler keeps answering `403`.
+- On the reactive stack the `Allow` header is emitted even though Spring Boot's own `DefaultErrorWebExceptionHandler` drops it when WebFlux raises `MethodNotAllowedException` natively. RFC 9110 requires a `405` to carry `Allow`, so this library sends it rather than reproducing the omission.
+- README gained an "HTTP method semantics" section covering the `HEAD` rule, the `405` behaviour and its limits, and why CORS pre-flight is a separate problem with a genuine servlet/reactive difference.
+
 ## [2.3.0] - 2026-08-05
 
 ### Added

@@ -4,7 +4,6 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import lombok.Getter;
 import lombok.Setter;
-import org.springframework.http.HttpMethod;
 
 /**
  * Represents an endpoint with an HttpMethod.
@@ -16,7 +15,7 @@ import org.springframework.http.HttpMethod;
 public class Endpoint {
 
   @NotNull
-  private HttpMethod method;
+  private EndpointMethod method;
 
   @NotNull
   @Pattern(regexp = "^/.*", message = "A path must start with /")
