@@ -976,3 +976,91 @@ rather than assumed. `StackIsolationTest` answers it three ways:
    `CorsConfigurationSource` bean or the `mvcHandlerMappingIntrospector`. So Spring MVC was
    already required on the servlet path, and the new webmvc reference adds no constraint that
    was not there already. Verified by probe, not reasoned.
+
+---
+
+## 15. What review changed
+
+Fable reviewed the first implementation and found four defects and three cleanups. All were
+verified from source or by probe before being acted on; two were things this plan asserted and
+got wrong.
+
+### 15.1 The management-context fix in §14.2 was incomplete
+
+§14.2 correctly identified that the servlet management chain must read the *child* context's
+mappings, and fixed it with `context.getBeanProvider(...).stream()`. **That does not scope the
+lookup.** `ObjectProvider.stream()` resolves through `beanNamesForTypeIncludingAncestors`, which
+excludes a parent bean only when the child defines one under the **same name**. Boot's management
+child context happens to define `requestMappingHandlerMapping`, shadowing the parent's — so the
+isolation held by coincidence, and any mapping in the main context under another name (Spring
+Integration's `integrationRequestMappingHandlerMapping`, a second mapping for a versioned API)
+would have leaked in.
+
+Probed directly: a child context asked for a type the parent also declares under a different name
+answers **2** through `getBeanProvider().stream()` and **1** through `getBeansOfType()`. Both
+management chains now use `getBeansOfType`, which does not traverse ancestors.
+
+**The §14.2 regression test could not have caught this**, which is the more useful lesson: it used
+`PUT /car`, and `/car` implements `PUT`, so the "the code implements this verb" rule returns 403
+whether or not the main context leaked in. The test now uses `PATCH`, which nothing implements on
+`/car`, and adds a mapping registered in the main context under a name the child does not shadow.
+Re-introducing `getBeanProvider().stream()` makes it fail with `405` and an `Allow` header — the
+disclosure the isolation exists to prevent. The reactive management port, which had no
+method-semantics coverage at all, now has its own test.
+
+### 15.2 The blacklist was matched by two independently built matcher sets
+
+The authorization registry resolves blacklist patterns with the parser the application configured
+(`PathPatternRequestMatcherBuilderFactoryBean` reads the `mvcPatternParser` bean and a base path;
+reactive `AuthorizeExchangeSpec.getPathPatternParser()` prefers the WebFlux mapping's parser). The
+denied-request handler re-parsed the same strings with a bare default builder. An application with
+a customised parser would have a registry that denies more than the handler recognises — and a
+blacklisted path whose denial is then rewritten to 405 with an `Allow` header, disclosing exactly
+what the blacklist exists to hide.
+
+Sharing the matcher instances would fix it, but the better answer is not to match twice at all:
+**the rule that makes the decision now records it.** `ServletBlacklistDenial` /
+`ReactiveBlacklistDenial` replace `denyAll()` on blacklist entries, deny identically, and mark the
+request; the handler reads the mark. No second matcher exists to disagree, and the handler learns
+which rule denied rather than guessing.
+
+### 15.3 The resolvers could turn a denial into a 500
+
+`mappings.get()` — the lazy snapshot — ran outside the `try` whose comment promised that a
+resolution failure never becomes a server error. `SingletonSupplier` does not cache failures, so a
+snapshot that throws (a denial in flight during context shutdown) would escape the handler on that
+request and every later one. Both resolvers now take the snapshot inside the `try`.
+
+### 15.4 A dead decorator, and duplicated decision logic
+
+- Setting `exceptionHandling`'s denied handler makes it global and Spring then ignores the
+  resource server's per-matcher registration, so with a consumer-supplied handler the second
+  decorator built for the bearer slot was unreachable — while still holding its own resolver and
+  its own parsed blacklist. Each chain now decides its handlers once, in a `DeniedHandlers` holder,
+  and installs exactly the one slot that is consulted.
+- `resolveAllowed()` and `serves()` were character-identical across the two handlers, so a fix to
+  one stack would silently diverge from the other while each stack's tests kept passing. The
+  decision moved to `EndpointRules.allowedFor(HttpMethod, SupportedMethods)`, shared by both.
+
+### 15.5 A behaviour change nobody had noticed: lowercase method values
+
+Not something this plan introduced, but something it exposes. Under the previous `HttpMethod`
+type, Boot bound `method: get` through `HttpMethod.valueOf`, which is **case-preserving** —
+`valueOf("get")` returns `new HttpMethod("get")`, not the `GET` constant — and both stacks'
+matchers compare the verb by exact string. A lowercase rule therefore **never matched**: the path
+fell through to `other-endpoints` and was denied. Enum binding is case-insensitive, so on 2.4.0
+the same line binds to `GET` and the rule takes effect: an `allowed-endpoints` entry becomes
+anonymous `permitAll`, a `secure-endpoints` entry starts granting.
+
+Nothing can warn about this at startup, because after binding the configuration is
+indistinguishable from one that was always correct. It is called out in the CHANGELOG and README
+as a pre-upgrade check, and pinned by a test.
+
+### 15.6 Left as it is, deliberately
+
+The review also flagged that a more-disclosing, handler-bypassing behaviour ships as the **default**
+of a minor release, and that §11 records the case for gating it behind a major. That is D9 and the
+version decision, both made knowingly (§7, §11). What the review added that was not previously
+written down is the audit consequence: a consumer whose `AccessDeniedHandler` is also where they
+audit denied requests will not see 405/200 responses. That is now stated in the README next to the
+opt-out.

@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
@@ -21,8 +20,6 @@ import org.springframework.mock.web.server.MockServerWebExchange;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.web.server.ServerWebExchange;
-import org.springframework.web.util.pattern.PathPattern;
-import org.springframework.web.util.pattern.PathPatternParser;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
@@ -50,7 +47,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
     ServerWebExchange exchange = exchange(HttpMethod.PUT);
 
-    StepVerifier.create(handler(List.of()).handle(exchange, DENIED)).verifyComplete();
+    StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
 
     assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(405);
     assertThat(allow(exchange)).containsExactlyInAnyOrder("GET", "DELETE");
@@ -62,7 +59,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   void implementedMethod_isLeftToTheDelegate() {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
 
-    StepVerifier.create(handler(List.of()).handle(exchange(HttpMethod.DELETE), DENIED))
+    StepVerifier.create(handler().handle(exchange(HttpMethod.DELETE), DENIED))
         .verifyComplete();
 
     verify(delegate).handle(any(), any());
@@ -72,7 +69,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   void headIsTreatedAsGet_soItIsLeftToTheDelegate() {
     given(new SupportedMethods(methods(HttpMethod.GET), true, false));
 
-    StepVerifier.create(handler(List.of()).handle(exchange(HttpMethod.HEAD), DENIED))
+    StepVerifier.create(handler().handle(exchange(HttpMethod.HEAD), DENIED))
         .verifyComplete();
 
     verify(delegate).handle(any(), any());
@@ -82,7 +79,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   void pathNoHandlerServes_isLeftToTheDelegate() {
     given(SupportedMethods.notServed());
 
-    StepVerifier.create(handler(List.of()).handle(exchange(HttpMethod.PUT), DENIED))
+    StepVerifier.create(handler().handle(exchange(HttpMethod.PUT), DENIED))
         .verifyComplete();
 
     verify(delegate).handle(any(), any());
@@ -92,7 +89,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   void mappingThatNamesNoMethod_isLeftToTheDelegate() {
     given(new SupportedMethods(Set.of(), true, true));
 
-    StepVerifier.create(handler(List.of()).handle(exchange(HttpMethod.PUT), DENIED))
+    StepVerifier.create(handler().handle(exchange(HttpMethod.PUT), DENIED))
         .verifyComplete();
 
     verify(delegate).handle(any(), any());
@@ -100,10 +97,10 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
 
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() {
-    PathPattern pattern = PathPatternParser.defaultInstance.parse("/car/**");
+    ServerWebExchange exchange = exchange(HttpMethod.PUT);
+    exchange.getAttributes().put(ReactiveBlacklistDenial.ATTRIBUTE, Boolean.TRUE);
 
-    StepVerifier.create(handler(List.of(pattern)).handle(exchange(HttpMethod.PUT), DENIED))
-        .verifyComplete();
+    StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
 
     verify(delegate).handle(any(), any());
     verifyNoInteractions(resolver);
@@ -114,7 +111,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), true, false));
     ServerWebExchange exchange = exchange(HttpMethod.OPTIONS);
 
-    StepVerifier.create(handler(List.of()).handle(exchange, DENIED)).verifyComplete();
+    StepVerifier.create(handler().handle(exchange, DENIED)).verifyComplete();
 
     assertThat(exchange.getResponse().getStatusCode().value()).isEqualTo(200);
     assertThat(allow(exchange)).containsExactlyInAnyOrder("GET", "POST", "HEAD", "OPTIONS");
@@ -124,7 +121,7 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
   void optionsThatTheApplicationImplementsItself_isLeftToTheDelegate() {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), true, false));
 
-    StepVerifier.create(handler(List.of()).handle(exchange(HttpMethod.OPTIONS), DENIED))
+    StepVerifier.create(handler().handle(exchange(HttpMethod.OPTIONS), DENIED))
         .verifyComplete();
 
     verify(delegate).handle(any(), any());
@@ -134,8 +131,8 @@ class MethodNotAllowedServerAccessDeniedHandlerTest {
     when(resolver.resolve(any())).thenReturn(supported);
   }
 
-  private MethodNotAllowedServerAccessDeniedHandler handler(List<PathPattern> blacklist) {
-    return new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver, blacklist);
+  private MethodNotAllowedServerAccessDeniedHandler handler() {
+    return new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver);
   }
 
   private static ServerWebExchange exchange(HttpMethod method) {

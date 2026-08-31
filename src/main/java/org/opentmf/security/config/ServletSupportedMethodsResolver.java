@@ -39,8 +39,10 @@ public class ServletSupportedMethodsResolver {
    * Creates a resolver over the given handler mappings.
    *
    * @param handlerMappings supplies the handler mappings of the context that actually dispatches
-   *     the requests this resolver will be asked about. It is called once, on first use — never
-   *     eagerly — so a chain may name a context that does not exist yet when it is built
+   *     the requests this resolver will be asked about, and <em>only</em> that context — a
+   *     lookup that reaches into a parent context would let one port answer for another's
+   *     routes. It is called once, on first use — never eagerly — so a chain may name a context
+   *     that does not exist yet when it is built
    */
   public ServletSupportedMethodsResolver(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
@@ -63,15 +65,19 @@ public class ServletSupportedMethodsResolver {
    * @return what the handler mappings declare, never {@code null}
    */
   public SupportedMethods resolve(HttpServletRequest request) {
-    Set<RequestMappingInfo> infos = mappings.get();
-    if (infos.isEmpty()) {
-      return SupportedMethods.notServed();
-    }
-    boolean parsedHere = !ServletRequestPathUtils.hasParsedRequestPath(request);
-    if (parsedHere) {
-      ServletRequestPathUtils.parseAndCache(request);
-    }
+    boolean parsedHere = false;
     try {
+      // Everything that can throw belongs inside: the lazy snapshot can fail on a denial that
+      // arrives during context shutdown, and SingletonSupplier does not cache a failure, so it
+      // would be retried and would escape on every later denial too.
+      Set<RequestMappingInfo> infos = mappings.get();
+      if (infos.isEmpty()) {
+        return SupportedMethods.notServed();
+      }
+      parsedHere = !ServletRequestPathUtils.hasParsedRequestPath(request);
+      if (parsedHere) {
+        ServletRequestPathUtils.parseAndCache(request);
+      }
       return match(infos, request);
     } catch (RuntimeException ex) {
       // A resolution failure must never turn a denial into a server error.

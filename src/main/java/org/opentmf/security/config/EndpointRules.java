@@ -2,6 +2,7 @@ package org.opentmf.security.config;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.opentmf.security.model.Endpoint;
@@ -33,6 +34,45 @@ public final class EndpointRules {
     return HttpMethod.GET.equals(method)
         ? new HttpMethod[] {HttpMethod.GET, HttpMethod.HEAD}
         : new HttpMethod[] {method};
+  }
+
+  /**
+   * Decides whether a denied request should be answered with the methods the application serves
+   * on its path, and which methods to name. Empty means the denial is none of this feature's
+   * business and belongs to whatever handler would otherwise have answered it.
+   *
+   * <p>Stack-neutral on purpose: servlet and reactive must answer the same request the same way,
+   * and a copy per stack would let them drift apart one fix at a time.
+   *
+   * @param requestMethod the method the caller used, never {@code null}
+   * @param supported what the application's handler mappings say about the path
+   * @return the methods to advertise, or empty to leave the denial alone
+   */
+  public static Optional<Set<HttpMethod>> allowedFor(
+      HttpMethod requestMethod, SupportedMethods supported) {
+    if (!supported.pathServed()) {
+      return Optional.empty();
+    }
+    Set<HttpMethod> declared = supported.declared();
+    if (HttpMethod.OPTIONS.equals(requestMethod)) {
+      // An application that maps OPTIONS itself has an authorization answer to give, not ours.
+      return declared.contains(HttpMethod.OPTIONS)
+          ? Optional.empty()
+          : Optional.of(optionsAllow(declared));
+    }
+    if (supported.acceptsAnyMethod() || serves(declared, requestMethod)) {
+      return Optional.empty();
+    }
+    return Optional.of(declared);
+  }
+
+  /**
+   * Mirrors Spring's own method matching, where a {@code HEAD} request is served by the handler
+   * mapped to {@code GET}.
+   */
+  private static boolean serves(Set<HttpMethod> declared, HttpMethod method) {
+    return declared.contains(method)
+        || (HttpMethod.HEAD.equals(method) && declared.contains(HttpMethod.GET));
   }
 
   /**

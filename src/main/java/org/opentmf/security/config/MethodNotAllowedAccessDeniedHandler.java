@@ -4,7 +4,6 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.util.List;
 import java.util.Optional;
 import java.util.Set;
 import lombok.RequiredArgsConstructor;
@@ -12,7 +11,6 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
  * Turns a denial into {@code 405 Method Not Allowed} when the application serves the request
@@ -42,7 +40,6 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
 
   private final AccessDeniedHandler delegate;
   private final ServletSupportedMethodsResolver resolver;
-  private final List<RequestMatcher> blacklist;
 
   @Override
   public void handle(
@@ -66,37 +63,11 @@ public class MethodNotAllowedAccessDeniedHandler implements AccessDeniedHandler 
    * belongs to the decorated handler.
    */
   private Optional<Set<HttpMethod>> resolveAllowed(HttpServletRequest request) {
-    if (isBlacklisted(request)) {
+    if (ServletBlacklistDenial.denied(request)) {
       // An explicitly closed path answers uniformly and discloses nothing about itself.
       return Optional.empty();
     }
-    SupportedMethods supported = resolver.resolve(request);
-    if (!supported.pathServed()) {
-      return Optional.empty();
-    }
-    Set<HttpMethod> declared = supported.declared();
-    if (HttpMethod.OPTIONS.matches(request.getMethod())) {
-      return declared.contains(HttpMethod.OPTIONS)
-          ? Optional.empty()
-          : Optional.of(EndpointRules.optionsAllow(declared));
-    }
-    if (supported.acceptsAnyMethod()
-        || serves(declared, HttpMethod.valueOf(request.getMethod()))) {
-      return Optional.empty();
-    }
-    return Optional.of(declared);
-  }
-
-  private boolean isBlacklisted(HttpServletRequest request) {
-    return blacklist.stream().anyMatch(matcher -> matcher.matches(request));
-  }
-
-  /**
-   * Mirrors Spring's own method matching, where a {@code HEAD} request is served by the
-   * handler mapped to {@code GET}.
-   */
-  private static boolean serves(Set<HttpMethod> declared, HttpMethod method) {
-    return declared.contains(method)
-        || (HttpMethod.HEAD.equals(method) && declared.contains(HttpMethod.GET));
+    return EndpointRules.allowedFor(
+        HttpMethod.valueOf(request.getMethod()), resolver.resolve(request));
   }
 }

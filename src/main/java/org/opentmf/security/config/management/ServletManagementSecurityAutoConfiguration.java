@@ -3,7 +3,6 @@ package org.opentmf.security.config.management;
 import static org.springframework.security.config.http.SessionCreationPolicy.STATELESS;
 
 import jakarta.servlet.http.HttpServletRequest;
-import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
@@ -11,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.config.EndpointRules;
 import org.opentmf.security.config.MethodNotAllowedAccessDeniedHandler;
+import org.opentmf.security.config.ServletBlacklistDenial;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletJwtSupport;
 import org.opentmf.security.config.ServletSupportedMethodsResolver;
@@ -18,7 +18,6 @@ import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
 import org.opentmf.security.model.UnmatchedMethodResponse;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -41,8 +40,6 @@ import org.springframework.security.config.annotation.web.configurers.oauth2.ser
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
 
 /**
@@ -77,7 +74,6 @@ public class ServletManagementSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties properties;
   private final ServletJwtSupport servletJwtSupport;
-  private final ObjectProvider<PathPatternRequestMatcher.Builder> requestMatcherBuilders;
   private final AtomicInteger managementPort = new AtomicInteger(-1);
   private final AtomicReference<ApplicationContext> managementContext = new AtomicReference<>();
 
@@ -123,13 +119,8 @@ public class ServletManagementSecurityAutoConfiguration {
    * management section's own {@code unmatched-method-response}.
    */
   private AccessDeniedHandler methodAware(AccessDeniedHandler delegate) {
-    PathPatternRequestMatcher.Builder builder =
-        requestMatcherBuilders.getIfAvailable(PathPatternRequestMatcher::withDefaults);
-    List<RequestMatcher> blacklist = properties.getManagement().getBlacklist().stream()
-        .map(path -> (RequestMatcher) builder.matcher(path))
-        .toList();
     return new MethodNotAllowedAccessDeniedHandler(
-        delegate, new ServletSupportedMethodsResolver(this::managementHandlerMappings), blacklist);
+        delegate, new ServletSupportedMethodsResolver(this::managementHandlerMappings));
   }
 
   /**
@@ -143,16 +134,21 @@ public class ServletManagementSecurityAutoConfiguration {
    */
   private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
     ApplicationContext context = managementContext.get();
+    // getBeansOfType, not getBeanProvider().stream(): the latter walks into ancestor contexts
+    // and excludes a parent bean only when the child happens to define one under the same name.
+    // The main context's mappings describe the business API, and answering a management-port
+    // denial from them would advertise verbs this port does not serve.
     return (context == null)
         ? Stream.empty()
-        : context.getBeanProvider(RequestMappingInfoHandlerMapping.class).stream();
+        : context.getBeansOfType(RequestMappingInfoHandlerMapping.class).values().stream();
   }
 
   private void applyManagementAuthorization(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
           requests) {
     Management management = properties.getManagement();
-    management.getBlacklist().forEach(path -> requests.requestMatchers(path).denyAll());
+    management.getBlacklist().forEach(path ->
+        requests.requestMatchers(path).access(ServletBlacklistDenial.INSTANCE));
     management.getWhitelist().forEach(path -> requests.requestMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

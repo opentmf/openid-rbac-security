@@ -9,7 +9,6 @@ import static org.mockito.Mockito.when;
 
 import java.util.Arrays;
 import java.util.LinkedHashSet;
-import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.junit.jupiter.api.BeforeEach;
@@ -20,7 +19,6 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.util.matcher.RequestMatcher;
 
 /**
  * Exercises every branch of the decision the handler makes, without a servlet container.
@@ -46,7 +44,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void unimplementedMethodOnServedPath_answersMethodNotAllowed() throws Exception {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
 
-    handler(List.of()).handle(request("PUT"), response, DENIED);
+    handler().handle(request("PUT"), response, DENIED);
 
     assertThat(response.getStatus()).isEqualTo(405);
     assertThat(allow()).containsExactlyInAnyOrder("GET", "DELETE");
@@ -58,7 +56,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void implementedMethod_isLeftToTheDelegate() throws Exception {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.DELETE), true, false));
 
-    handler(List.of()).handle(request("DELETE"), response, DENIED);
+    handler().handle(request("DELETE"), response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
     assertThat(response.getHeader(HttpHeaders.ALLOW)).isNull();
@@ -68,7 +66,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void headIsTreatedAsGet_soItIsLeftToTheDelegate() throws Exception {
     given(new SupportedMethods(methods(HttpMethod.GET), true, false));
 
-    handler(List.of()).handle(request("HEAD"), response, DENIED);
+    handler().handle(request("HEAD"), response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
   }
@@ -77,7 +75,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void pathNoHandlerServes_isLeftToTheDelegate() throws Exception {
     given(SupportedMethods.notServed());
 
-    handler(List.of()).handle(request("PUT"), response, DENIED);
+    handler().handle(request("PUT"), response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
   }
@@ -86,17 +84,17 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void mappingThatNamesNoMethod_isLeftToTheDelegate() throws Exception {
     given(new SupportedMethods(Set.of(), true, true));
 
-    handler(List.of()).handle(request("PUT"), response, DENIED);
+    handler().handle(request("PUT"), response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
   }
 
   @Test
   void blacklistedPath_isLeftToTheDelegateWithoutConsultingTheMappings() throws Exception {
-    RequestMatcher matcher = mock(RequestMatcher.class);
-    when(matcher.matches(any())).thenReturn(true);
+    MockHttpServletRequest request = request("PUT");
+    request.setAttribute(ServletBlacklistDenial.ATTRIBUTE, Boolean.TRUE);
 
-    handler(List.of(matcher)).handle(request("PUT"), response, DENIED);
+    handler().handle(request, response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
     verifyNoInteractions(resolver);
@@ -106,7 +104,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void options_answersOkWithTheOptionsAllowSet() throws Exception {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.POST), true, false));
 
-    handler(List.of()).handle(request("OPTIONS"), response, DENIED);
+    handler().handle(request("OPTIONS"), response, DENIED);
 
     assertThat(response.getStatus()).isEqualTo(200);
     assertThat(allow()).containsExactlyInAnyOrder("GET", "POST", "HEAD", "OPTIONS");
@@ -116,7 +114,7 @@ class MethodNotAllowedAccessDeniedHandlerTest {
   void optionsThatTheApplicationImplementsItself_isLeftToTheDelegate() throws Exception {
     given(new SupportedMethods(methods(HttpMethod.GET, HttpMethod.OPTIONS), true, false));
 
-    handler(List.of()).handle(request("OPTIONS"), response, DENIED);
+    handler().handle(request("OPTIONS"), response, DENIED);
 
     verify(delegate).handle(any(), any(), any());
   }
@@ -125,8 +123,8 @@ class MethodNotAllowedAccessDeniedHandlerTest {
     when(resolver.resolve(any())).thenReturn(supported);
   }
 
-  private MethodNotAllowedAccessDeniedHandler handler(List<RequestMatcher> blacklist) {
-    return new MethodNotAllowedAccessDeniedHandler(delegate, resolver, blacklist);
+  private MethodNotAllowedAccessDeniedHandler handler() {
+    return new MethodNotAllowedAccessDeniedHandler(delegate, resolver);
   }
 
   private static MockHttpServletRequest request(String method) {

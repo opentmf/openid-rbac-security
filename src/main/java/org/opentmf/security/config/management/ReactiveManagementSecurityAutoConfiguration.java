@@ -1,22 +1,23 @@
 package org.opentmf.security.config.management;
 
-import java.util.List;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.config.EndpointRules;
 import org.opentmf.security.config.MethodNotAllowedServerAccessDeniedHandler;
+import org.opentmf.security.config.ReactiveBlacklistDenial;
 import org.opentmf.security.config.ReactiveJwtSupport;
 import org.opentmf.security.config.ReactiveSupportedMethodsResolver;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
 import org.opentmf.security.model.UnmatchedMethodResponse;
-import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.actuate.autoconfigure.web.ManagementContextConfiguration;
 import org.springframework.boot.actuate.autoconfigure.web.ManagementContextType;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Conditional;
 import org.springframework.core.Ordered;
@@ -36,8 +37,6 @@ import org.springframework.security.web.server.authorization.ServerAccessDeniedH
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
 import org.springframework.web.reactive.result.method.RequestMappingInfoHandlerMapping;
-import org.springframework.web.util.pattern.PathPattern;
-import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * Registers a JWT-authenticated {@link SecurityWebFilterChain} into the management child
@@ -65,7 +64,7 @@ public class ReactiveManagementSecurityAutoConfiguration {
 
   private final OpenTmfSecurityProperties properties;
   private final ReactiveJwtSupport reactiveJwtSupport;
-  private final ObjectProvider<RequestMappingInfoHandlerMapping> handlerMappings;
+  private final ApplicationContext applicationContext;
 
   @Bean
   @Order(Ordered.HIGHEST_PRECEDENCE)
@@ -97,16 +96,27 @@ public class ReactiveManagementSecurityAutoConfiguration {
    * management section's own {@code unmatched-method-response}.
    */
   private ServerAccessDeniedHandler methodAware(ServerAccessDeniedHandler delegate) {
-    List<PathPattern> blacklist = properties.getManagement().getBlacklist().stream()
-        .map(PathPatternParser.defaultInstance::parse)
-        .toList();
     return new MethodNotAllowedServerAccessDeniedHandler(
-        delegate, new ReactiveSupportedMethodsResolver(handlerMappings::stream), blacklist);
+        delegate, new ReactiveSupportedMethodsResolver(this::managementHandlerMappings));
+  }
+
+  /**
+   * The management child context's own handler mappings — the actuator's. {@code getBeansOfType}
+   * rather than {@code getBeanProvider().stream()}, because the latter walks into the parent
+   * context and excludes a parent bean only when this one defines another under the same name;
+   * a differently named mapping in the main context would otherwise let this port advertise the
+   * business API's verbs.
+   */
+  private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
+    return applicationContext.getBeansOfType(RequestMappingInfoHandlerMapping.class)
+        .values()
+        .stream();
   }
 
   private void applyManagementAuthorization(AuthorizeExchangeSpec exchanges) {
     Management management = properties.getManagement();
-    management.getBlacklist().forEach(path -> exchanges.pathMatchers(path).denyAll());
+    management.getBlacklist().forEach(path ->
+        exchanges.pathMatchers(path).access(ReactiveBlacklistDenial.INSTANCE));
     management.getWhitelist().forEach(path -> exchanges.pathMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

@@ -31,7 +31,8 @@ public class ReactiveSupportedMethodsResolver {
    * Creates a resolver over the given handler mappings.
    *
    * @param handlerMappings supplies the handler mappings of the context that actually dispatches
-   *     the requests this resolver will be asked about, called once on first use
+   *     the requests this resolver will be asked about, and only that context; called once on
+   *     first use
    */
   public ReactiveSupportedMethodsResolver(
       Supplier<Stream<RequestMappingInfoHandlerMapping>> handlerMappings) {
@@ -54,11 +55,13 @@ public class ReactiveSupportedMethodsResolver {
    * @return what the handler mappings declare, never {@code null}
    */
   public SupportedMethods resolve(ServerWebExchange exchange) {
-    Set<RequestMappingInfo> infos = mappings.get();
-    if (infos.isEmpty()) {
-      return SupportedMethods.notServed();
-    }
     try {
+      // The lazy snapshot is inside the try on purpose: it can fail on a denial that arrives
+      // during context shutdown, and SingletonSupplier does not cache a failure.
+      Set<RequestMappingInfo> infos = mappings.get();
+      if (infos.isEmpty()) {
+        return SupportedMethods.notServed();
+      }
       return match(infos, exchange);
     } catch (RuntimeException ex) {
       // A resolution failure must never turn a denial into a server error.

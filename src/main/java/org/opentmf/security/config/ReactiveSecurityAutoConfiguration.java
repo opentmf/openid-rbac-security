@@ -3,7 +3,7 @@ package org.opentmf.security.config;
 import static org.opentmf.security.config.UniqueBeanResolver.resolveUnique;
 import static org.springframework.security.config.Customizer.withDefaults;
 
-import java.util.List;
+import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
@@ -13,6 +13,7 @@ import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
+import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.Customizer;
@@ -33,8 +34,6 @@ import org.springframework.security.web.server.authorization.ServerAccessDeniedH
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.util.CollectionUtils;
 import org.springframework.web.reactive.result.method.RequestMappingInfoHandlerMapping;
-import org.springframework.web.util.pattern.PathPattern;
-import org.springframework.web.util.pattern.PathPatternParser;
 
 /**
  * OpenTMF Reactive Security configures according to the supplied OpenTmfSecurityProperties.
@@ -53,12 +52,13 @@ public class ReactiveSecurityAutoConfiguration {
   private final ReactiveJwtSupport reactiveJwtSupport;
   private final ObjectProvider<ServerAuthenticationEntryPoint> authenticationEntryPoints;
   private final ObjectProvider<ServerAccessDeniedHandler> accessDeniedHandlers;
-  private final ObjectProvider<RequestMappingInfoHandlerMapping> handlerMappings;
+  private final ApplicationContext applicationContext;
 
   @Bean
   SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
     var entryPoint = resolveUnique(authenticationEntryPoints, ServerAuthenticationEntryPoint.class);
     var accessDeniedHandler = resolveUnique(accessDeniedHandlers, ServerAccessDeniedHandler.class);
+    var deniedHandlers = new DeniedHandlers(accessDeniedHandler);
     return http
         .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
         .csrf(CsrfSpec::disable)
@@ -69,9 +69,48 @@ public class ReactiveSecurityAutoConfiguration {
         .cors(withDefaults())
         .authorizeExchange(applyOpenTmfSecurityDefinitions())
         .exceptionHandling(handling ->
-            configureExceptionHandling(handling, entryPoint, accessDeniedHandler))
-        .oauth2ResourceServer(configureResourceServer(entryPoint, accessDeniedHandler))
+            configureExceptionHandling(handling, entryPoint, deniedHandlers))
+        .oauth2ResourceServer(configureResourceServer(entryPoint, deniedHandlers))
         .build();
+  }
+
+  /**
+   * The denied-request handlers for one chain, decided once. See the servlet twin for why only
+   * one of the two slots is ever consulted.
+   */
+  private final class DeniedHandlers {
+
+    private final ReactiveSupportedMethodsResolver resolver;
+    private final ServerAccessDeniedHandler global;
+    private final ServerAccessDeniedHandler bearer;
+
+    private DeniedHandlers(ServerAccessDeniedHandler consumerHandler) {
+      boolean methodAware = openTmfSecurityProperties.getUnmatchedMethodResponse()
+          == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
+      this.resolver = methodAware
+          ? new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings)
+          : null;
+      this.global = (consumerHandler != null) ? decorate(consumerHandler) : null;
+      this.bearer = (consumerHandler != null || !methodAware)
+          ? null
+          : decorate(new BearerTokenServerAccessDeniedHandler());
+    }
+
+    private ServerAccessDeniedHandler decorate(ServerAccessDeniedHandler delegate) {
+      return (resolver == null)
+          ? delegate
+          : new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver);
+    }
+  }
+
+  /**
+   * The handler mappings of this context and no other. A lookup that reached into a parent
+   * context would let this chain answer for routes it does not serve.
+   */
+  private Stream<RequestMappingInfoHandlerMapping> mappings() {
+    return applicationContext.getBeansOfType(RequestMappingInfoHandlerMapping.class)
+        .values()
+        .stream();
   }
 
   /**
@@ -82,30 +121,13 @@ public class ReactiveSecurityAutoConfiguration {
   private void configureExceptionHandling(
       ExceptionHandlingSpec handling,
       ServerAuthenticationEntryPoint entryPoint,
-      ServerAccessDeniedHandler accessDeniedHandler) {
+      DeniedHandlers deniedHandlers) {
     if (entryPoint != null) {
       handling.authenticationEntryPoint(entryPoint);
     }
-    if (accessDeniedHandler != null) {
-      handling.accessDeniedHandler(methodAware(accessDeniedHandler));
+    if (deniedHandlers.global != null) {
+      handling.accessDeniedHandler(deniedHandlers.global);
     }
-  }
-
-  /**
-   * Decorates a denied-request handler so that a request for a method the application does not
-   * serve on that path is answered {@code 405} rather than {@code 403}. Returns the handler
-   * untouched when {@code opentmf.security.unmatched-method-response} is {@code DENY}.
-   */
-  private ServerAccessDeniedHandler methodAware(ServerAccessDeniedHandler delegate) {
-    if (openTmfSecurityProperties.getUnmatchedMethodResponse()
-        != UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
-      return delegate;
-    }
-    List<PathPattern> blacklist = openTmfSecurityProperties.getBlacklist().stream()
-        .map(PathPatternParser.defaultInstance::parse)
-        .toList();
-    return new MethodNotAllowedServerAccessDeniedHandler(
-        delegate, new ReactiveSupportedMethodsResolver(handlerMappings::stream), blacklist);
   }
 
   /**
@@ -116,37 +138,16 @@ public class ReactiveSecurityAutoConfiguration {
    * {@code ExceptionTranslationWebFilter} ever sees them.
    */
   private Customizer<OAuth2ResourceServerSpec> configureResourceServer(
-      ServerAuthenticationEntryPoint entryPoint, ServerAccessDeniedHandler accessDeniedHandler) {
+      ServerAuthenticationEntryPoint entryPoint, DeniedHandlers deniedHandlers) {
     return resourceServer -> {
       reactiveJwtSupport.apply(resourceServer);
       if (entryPoint != null) {
         resourceServer.authenticationEntryPoint(entryPoint);
       }
-      configureDeniedHandler(resourceServer, accessDeniedHandler);
-    };
-  }
-
-  /**
-   * Sets the denied-request handler on the bearer-token path. Spring routes every denial of a
-   * request carrying a bearer token here rather than to the global handler, so the {@code 405}
-   * decoration has to be applied on this path too — every authenticated caller of this library
-   * carries one. When there is nothing to decorate and no consumer handler, the slot is left
-   * alone so Spring's own default keeps applying.
-   */
-  private void configureDeniedHandler(
-      OAuth2ResourceServerSpec resourceServer, ServerAccessDeniedHandler consumerHandler) {
-    boolean answersMethodNotAllowed = openTmfSecurityProperties.getUnmatchedMethodResponse()
-        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
-    if (!answersMethodNotAllowed) {
-      if (consumerHandler != null) {
-        resourceServer.accessDeniedHandler(consumerHandler);
+      if (deniedHandlers.bearer != null) {
+        resourceServer.accessDeniedHandler(deniedHandlers.bearer);
       }
-      return;
-    }
-    ServerAccessDeniedHandler delegate = (consumerHandler != null)
-        ? consumerHandler
-        : new BearerTokenServerAccessDeniedHandler();
-    resourceServer.accessDeniedHandler(methodAware(delegate));
+    };
   }
 
   private Customizer<AuthorizeExchangeSpec> applyOpenTmfSecurityDefinitions() {
@@ -186,7 +187,7 @@ public class ReactiveSecurityAutoConfiguration {
   private void configureBlacklist(AuthorizeExchangeSpec exchanges) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
       exchanges.pathMatchers(openTmfSecurityProperties.getBlacklist().toArray(String[]::new))
-          .denyAll();
+          .access(ReactiveBlacklistDenial.INSTANCE);
     }
   }
 

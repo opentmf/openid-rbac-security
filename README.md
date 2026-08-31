@@ -351,13 +351,16 @@ Convergence happens at the renderer instead of the dispatch path — same single
 | No token on a protected URL | 401 | `ExceptionTranslationFilter` / `ExceptionTranslationWebFilter` | entry point |
 | Invalid / expired / malformed token | 401 | Bearer-token filter | entry point |
 | Invalid token on a **`permitAll`** URL | 401 | Bearer-token filter — a present-but-bad token is always authenticated | entry point |
-| Valid token, insufficient role | 403 | `AuthorizationFilter` → exception translation | access-denied handler |
+| Valid token, insufficient role, method **is** implemented | 403 | `AuthorizationFilter` → exception translation | access-denied handler |
+| Valid token, method **is not** implemented on that path | 405 (200 for `OPTIONS`) | This library, before the access-denied handler — see [HTTP method semantics](#http-method-semantics) | **nobody**: the library writes it and your handler is not invoked |
 | **Anonymous** request on a `denyAll` / blacklisted URL | 401 (not 403!) | Exception translation treats anonymous denials as authentication failures | entry point |
 | `@PreAuthorize` denial inside a handler method | 403 | Reaches your `@RestControllerAdvice` as `AccessDeniedException` | your advice (unchanged by this feature) |
 
-### Management port is not affected
+### Management port takes no custom handlers
 
-The management-port chain deliberately keeps the RFC 6750 defaults (status + `WWW-Authenticate`, empty body): it serves probes and scrapers that read status codes, not bodies. Custom entry points / denied handlers apply to the main port only.
+A consumer-supplied entry point or denied handler applies to the **main port only**. The management-port chain keeps the RFC 6750 defaults (status + `WWW-Authenticate`, empty body): it serves probes and scrapers that read status codes, not bodies.
+
+That is about *custom rendering*, not about status codes. The management port does follow the method semantics below — `opentmf.security.management.unmatched-method-response` defaults to `method-not-allowed` just like the main port, so a denied request there for a method the actuator does not serve answers **405** (or **200** for `OPTIONS`), not 403. If you alert on 403s from the management port, add 405 to the alert or set that property to `deny`.
 
 ## HTTP method semantics
 
@@ -382,6 +385,12 @@ Spring MVC and WebFlux both serve a `HEAD` request from the handler mapped to `G
 2.4.0 the security chain refused requests the framework was perfectly willing to answer — which
 showed up as 403s from monitoring agents, reverse proxies and health checkers. This is not
 optional and there is no property to turn it off.
+
+Method values are matched case-insensitively when binding, so `get` and `GET` mean the same
+thing. **Before 2.4.0 they did not:** the value bound through `HttpMethod.valueOf`, which
+preserves case, and the request matchers compare verbs by exact string — so a lowercase rule
+silently never matched and its path fell through to `other-endpoints`. If you are upgrading,
+check your rules for lowercase method values; one that never worked will start working.
 
 For the same reason `method` accepts only **`GET`, `POST`, `PUT`, `PATCH`, `DELETE`**. `HEAD` is
 implied by `GET`; allowing it to be named separately would let a configuration declare different
@@ -418,8 +427,11 @@ Details worth knowing:
   which is what RFC 9110 specifies.
 - **Blacklisted paths answer `403` uniformly**, with no `Allow` header. An explicitly closed path
   discloses nothing about itself.
-- **The response has no body.** A consumer-supplied `AccessDeniedHandler` is not invoked for
-  these responses; it still handles every other denial, including the `403` cases above.
+- **The response has no body, and your `AccessDeniedHandler` does not see it.** The library
+  writes these responses itself; a consumer-supplied handler still renders every other denial,
+  including the `403` cases above. **If that handler is also where you audit denied requests,
+  405/200 responses will not reach your audit log** — hook the audit somewhere that sees them,
+  or set `unmatched-method-response: deny`.
 - **Only annotation-based controllers are consulted.** A path served solely by a functional route
   or a resource handler keeps answering `403`.
 - **Both ports.** `opentmf.security.management.unmatched-method-response` is the management-port

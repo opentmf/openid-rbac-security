@@ -40,6 +40,21 @@ class EndpointMethodBindingTest {
         .hasMessageContaining("opentmf.security.endpoint");
   }
 
+  /**
+   * Enum binding is lenient, so a lowercase value now works — and that is a behaviour change
+   * worth pinning. Under the previous {@code HttpMethod} type, Boot bound through
+   * {@code HttpMethod.valueOf}, which is case-preserving: {@code "get"} produced
+   * {@code new HttpMethod("get")}, and both stacks' matchers compare the verb by exact string,
+   * so the rule never matched and the path fell through to the catch-all. A lowercase rule was
+   * therefore dead — and becomes live on upgrade.
+   */
+  @ParameterizedTest
+  @ValueSource(strings = {"get", "Get", "GET"})
+  void aLowercaseMethod_bindsWhereItPreviouslyProducedADeadRule(String method) {
+    assertThat(bind(method).getMethod()).isEqualTo(EndpointMethod.GET);
+    assertThat(HttpMethod.valueOf(method).name()).isEqualTo(method);
+  }
+
   @ParameterizedTest
   @EnumSource(EndpointMethod.class)
   void toHttpMethod_mapsOntoSpringsOwnConstant(EndpointMethod method) {
