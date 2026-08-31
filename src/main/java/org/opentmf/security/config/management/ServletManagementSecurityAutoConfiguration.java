@@ -164,8 +164,9 @@ public class ServletManagementSecurityAutoConfiguration {
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
           requests) {
     Management management = properties.getManagement();
+    var blacklistDenial = new ServletBlacklistDenial();
     management.getBlacklist().forEach(path ->
-        requests.requestMatchers(path).access(ServletBlacklistDenial.INSTANCE));
+        requests.requestMatchers(path).access(blacklistDenial));
     management.getWhitelist().forEach(path -> requests.requestMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

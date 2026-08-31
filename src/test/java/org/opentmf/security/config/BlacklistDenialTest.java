@@ -24,7 +24,7 @@ class BlacklistDenialTest {
 
   @Test
   void servletRule_deniesWithTheBlacklistDecision() {
-    AuthorizationResult result = ServletBlacklistDenial.INSTANCE.authorize(
+    AuthorizationResult result = new ServletBlacklistDenial().authorize(
         () -> null, new RequestAuthorizationContext(new MockHttpServletRequest("PUT", "/closed")));
 
     assertThat(result.isGranted()).isFalse();
@@ -41,7 +41,7 @@ class BlacklistDenialTest {
     var exchange = MockServerWebExchange.from(MockServerHttpRequest.put("/closed"));
 
     StepVerifier
-        .create(ReactiveBlacklistDenial.INSTANCE.authorize(
+        .create(new ReactiveBlacklistDenial().authorize(
             Mono.empty(), new AuthorizationContext(exchange)))
         .expectErrorSatisfies(error -> {
           assertThat(error).isInstanceOf(AuthorizationDeniedException.class);

@@ -164,8 +164,9 @@ public class ServletSecurityAutoConfiguration {
   private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
+      var blacklistDenial = new ServletBlacklistDenial();
       openTmfSecurityProperties.getBlacklist().forEach(blackListedEndpoint ->
-          requests.requestMatchers(blackListedEndpoint).access(ServletBlacklistDenial.INSTANCE));
+          requests.requestMatchers(blackListedEndpoint).access(blacklistDenial));
     }
   }
 

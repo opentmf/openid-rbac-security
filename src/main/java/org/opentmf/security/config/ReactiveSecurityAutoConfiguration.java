@@ -182,7 +182,7 @@ public class ReactiveSecurityAutoConfiguration {
   private void configureBlacklist(AuthorizeExchangeSpec exchanges) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
       exchanges.pathMatchers(openTmfSecurityProperties.getBlacklist().toArray(String[]::new))
-          .access(ReactiveBlacklistDenial.INSTANCE);
+          .access(new ReactiveBlacklistDenial());
     }
   }
 

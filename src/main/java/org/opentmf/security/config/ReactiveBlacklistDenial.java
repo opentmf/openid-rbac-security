@@ -21,12 +21,6 @@ import reactor.core.publisher.Mono;
 public final class ReactiveBlacklistDenial
     implements ReactiveAuthorizationManager<AuthorizationContext> {
 
-  public static final ReactiveBlacklistDenial INSTANCE = new ReactiveBlacklistDenial();
-
-  private ReactiveBlacklistDenial() {
-    // Stateless; one instance is enough.
-  }
-
   @Override
   public Mono<AuthorizationResult> authorize(
       Mono<Authentication> authentication, AuthorizationContext context) {

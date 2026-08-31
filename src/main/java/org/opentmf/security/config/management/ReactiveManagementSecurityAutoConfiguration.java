@@ -119,8 +119,9 @@ public class ReactiveManagementSecurityAutoConfiguration {
 
   private void applyManagementAuthorization(AuthorizeExchangeSpec exchanges) {
     Management management = properties.getManagement();
+    var blacklistDenial = new ReactiveBlacklistDenial();
     management.getBlacklist().forEach(path ->
-        exchanges.pathMatchers(path).access(ReactiveBlacklistDenial.INSTANCE));
+        exchanges.pathMatchers(path).access(blacklistDenial));
     management.getWhitelist().forEach(path -> exchanges.pathMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

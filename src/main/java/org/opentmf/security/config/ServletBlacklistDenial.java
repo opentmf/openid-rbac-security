@@ -19,12 +19,6 @@ import org.springframework.security.web.access.intercept.RequestAuthorizationCon
 public final class ServletBlacklistDenial
     implements AuthorizationManager<RequestAuthorizationContext> {
 
-  public static final ServletBlacklistDenial INSTANCE = new ServletBlacklistDenial();
-
-  private ServletBlacklistDenial() {
-    // Stateless; one instance is enough.
-  }
-
   @Override
   public AuthorizationResult authorize(
       Supplier<? extends Authentication> authentication, RequestAuthorizationContext context) {

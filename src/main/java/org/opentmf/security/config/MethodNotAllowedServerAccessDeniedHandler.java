@@ -35,8 +35,8 @@ public class MethodNotAllowedServerAccessDeniedHandler implements ServerAccessDe
       var response = exchange.getResponse();
       if (response.isCommitted()) {
         // A committed response is read-only: writing the headers would throw and turn the
-        // denial into an error signal. The servlet container quietly ignores such writes;
-        // leaving the response alone is this stack's equivalent.
+        // denial into an error signal. The servlet container quietly ignores such late
+        // writes, and leaving the response alone is this stack's equivalent.
         return Mono.empty();
       }
       if (options) {
