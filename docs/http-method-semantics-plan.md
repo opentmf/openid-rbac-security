@@ -513,6 +513,14 @@ first resolution must happen on the first denial, long after context refresh.
 
 **Decision (Gökhan, 2026-08-31): build the lazy cache.**
 
+> **Superseded in part — read §20.4 before implementing from this section.** The handler-mapping
+> *beans* are still looked up once and cached, exactly as decided here. The *infos* are not: they
+> are re-read on each resolution behind a one-second view, because a permanent snapshot cannot
+> see mappings registered at runtime and cannot carry each mapping's own `UrlPathHelper` for the
+> legacy Ant path — the two residuals §19 put to the maintainer, who chose to engineer around
+> them rather than document them. The reason this decision existed is preserved: a flood of
+> denials still cannot turn `getHandlerMethods()` into a per-request registry copy.
+
 `getHandlerMethods()` acquires a read lock and builds a fresh map on every call. Denials are
 rare but can be attacker-driven, so recomputing per denied request hands a flood of 403s a
 cost multiplier.
@@ -880,7 +888,7 @@ audience, so all four belong.
 |---|---|---|---|
 | **D1** | The controller is the authoritative contract; unimplemented verb → 405 | §2 | Gökhan, 2026-08-31 |
 | **D2** | HEAD-follows-GET ships ungated | §4.3 | Superseded — settled structurally by D8 |
-| **D3** | Cache the `RequestMappingInfo` snapshot lazily via `SingletonSupplier` | §5.4 | Gökhan, 2026-08-31 |
+| **D3** | Cache the `RequestMappingInfo` snapshot lazily via `SingletonSupplier` | §5.4 | Superseded by §20.4 — the bean lookup is still cached once, the infos are re-read per denial behind a one-second view |
 | **D4** | Read supported verbs from `getHandlerMethods()` + Spring's own conditions, not `getHandler()` | §5.3 | Design, from source analysis |
 | **D5** | Blacklisted paths always answer 403 with no `Allow` | §5.5 | Design; disclosure choice |
 | **D6** | 405 only on the denied path, never the entry-point path | §5.6 | Hard constraint |
