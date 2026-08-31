@@ -35,8 +35,9 @@ class EndpointRulesTest {
   void optionsAllow_whenNothingDeclared_offersEveryMethodButTrace() {
     Set<HttpMethod> allowed = EndpointRules.optionsAllow(Set.of());
 
-    assertThat(allowed).contains(HttpMethod.GET, HttpMethod.HEAD, HttpMethod.OPTIONS);
-    assertThat(allowed).doesNotContain(HttpMethod.TRACE);
+    assertThat(allowed)
+        .contains(HttpMethod.GET, HttpMethod.HEAD, HttpMethod.OPTIONS)
+        .doesNotContain(HttpMethod.TRACE);
   }
 
   @Test
