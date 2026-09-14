@@ -184,3 +184,13 @@ Against the plan as first written; each item verified from the 7.0.9 / 7.1.1 sou
    matters; the README says so plainly.
 10. **The 3.0.0 "whitelisted path + unknown method → 501" claim was wrong** — `FrameworkServlet.service`
     routes any non-standard method to `processRequest` — and is corrected in §2's spirit by §3.1.
+11. **One unexplained observation, recorded rather than smoothed over.** In the first full `clean verify`
+    (right after the Keycloak image pull, ~200 s into the JVM) `ServletMultiIssuerIT`'s context answered
+    404 for `/car` and `/car/{name}` on every request: the resolver found no claim, and the application's
+    advice did not render the exception either (Spring's default resolver did). Six later full runs and
+    four isolated loops never reproduced it. The obvious theory — the `DispatcherServlet` initialising
+    lazily on the first request, after the filter — was tested and disproven: `ServletFirstRequestIT`
+    pins that the very first request of a fresh context on a mapped path is served (the resolver reads
+    the `HandlerMapping` beans, which exist since refresh, and Tomcat initialises the servlet before the
+    filter chain runs anyway). The resolver now traces every mapping's claim per request, so a recurrence
+    is diagnosable; the field check is the four matrix probes on every service pin.
