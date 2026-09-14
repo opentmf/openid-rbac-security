@@ -29,6 +29,15 @@ public class OpenTmfSecurityProperties {
   public static final String PREFIX = "opentmf.security";
 
   /**
+   * Properties that used to exist and now have no effect, named so that the startup guard can
+   * refuse a configuration that still sets one rather than let it be silently ignored.
+   * {@code unmatched-method-response} (3.0.0) chose between {@code 405} and {@code 403} for a
+   * method the application does not implement; since 3.1.0 the HTTP-status matrix is not
+   * configurable and the property is gone from both sections.
+   */
+  public static final List<String> RETIRED_PROPERTIES = List.of("unmatched-method-response");
+
+  /**
    * The property names of the rule lists whose entries carry a {@code method}. Kept next to the
    * fields they name so that renaming or adding such a list is a one-place change — the startup
    * case guard walks exactly these lists, under {@link #PREFIX} and its management twin.
@@ -125,17 +134,6 @@ public class OpenTmfSecurityProperties {
    * {@link OtherEndpoints#ALLOW} to permit them anonymously.
    */
   private OtherEndpoints otherEndpoints = OtherEndpoints.DENY;
-
-  /**
-   * How to answer a denied main-port request whose path the application serves, but not for
-   * the HTTP method that was used. Defaults to
-   * {@link UnmatchedMethodResponse#METHOD_NOT_ALLOWED} — the same {@code 405} with an
-   * {@code Allow} header that Spring itself would return had the request reached the
-   * dispatcher. Set to {@link UnmatchedMethodResponse#DENY} to answer every denial with
-   * {@code 403}, as releases before 3.0.0 did.
-   */
-  private UnmatchedMethodResponse unmatchedMethodResponse =
-      UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
 
   /**
    * Security configuration applied to the actuator management port when
@@ -239,17 +237,5 @@ public class OpenTmfSecurityProperties {
      * with any valid JWT, without enumerating each one.
      */
     private OtherEndpoints otherEndpoints = OtherEndpoints.AUTHENTICATED;
-
-    /**
-     * How to answer a denied management-port request whose path the application serves, but
-     * not for the HTTP method that was used. Mirrors the main-port
-     * {@code unmatched-method-response} and shares its default,
-     * {@link UnmatchedMethodResponse#METHOD_NOT_ALLOWED}. Mostly inert while
-     * {@link #otherEndpoints} keeps its {@link OtherEndpoints#AUTHENTICATED} default, since
-     * an unmatched request then reaches the actuator and is answered there; it matters when
-     * a deployment tightens the management port to {@link OtherEndpoints#DENY}.
-     */
-    private UnmatchedMethodResponse unmatchedMethodResponse =
-      UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
   }
 }

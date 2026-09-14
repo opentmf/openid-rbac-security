@@ -118,7 +118,8 @@ class StackIsolationTest {
       ServletJwtAutoConfiguration.class,
       ServletManagementSecurityAutoConfiguration.class,
       ServletSupportedMethodsResolver.class,
-      MethodNotAllowedAccessDeniedHandler.class})
+      ServletHttpStatusMatrixFilter.class,
+      OptionsAccessDeniedHandler.class})
   void servletClasses_nameNoWebFluxType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/reactive")
@@ -131,7 +132,8 @@ class StackIsolationTest {
       ReactiveJwtAutoConfiguration.class,
       ReactiveManagementSecurityAutoConfiguration.class,
       ReactiveSupportedMethodsResolver.class,
-      MethodNotAllowedServerAccessDeniedHandler.class})
+      ReactiveHttpStatusMatrixFilter.class,
+      OptionsServerAccessDeniedHandler.class})
   void reactiveClasses_nameNoSpringMvcOrServletType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/servlet")

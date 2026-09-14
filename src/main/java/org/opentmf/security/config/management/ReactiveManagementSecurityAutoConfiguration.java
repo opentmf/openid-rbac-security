@@ -4,15 +4,14 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.config.EndpointRules;
-import org.opentmf.security.config.MethodNotAllowedServerAccessDeniedHandler;
-import org.opentmf.security.config.ReactiveBlacklistDenial;
+import org.opentmf.security.config.OptionsServerAccessDeniedHandler;
+import org.opentmf.security.config.ReactiveHttpStatusMatrixFilter;
 import org.opentmf.security.config.ReactiveJwtSupport;
 import org.opentmf.security.config.ReactiveSupportedMethodsResolver;
 import org.opentmf.security.config.SupportedMethodsWarmer;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
-import org.opentmf.security.model.UnmatchedMethodResponse;
 import org.springframework.boot.actuate.autoconfigure.web.ManagementContextConfiguration;
 import org.springframework.boot.actuate.autoconfigure.web.ManagementContextType;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
@@ -33,12 +32,12 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.FormLog
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
+import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.oauth2.server.resource.web.access.server.BearerTokenServerAccessDeniedHandler;
 import org.springframework.security.web.server.SecurityWebFilterChain;
-import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.security.web.server.util.matcher.ServerWebExchangeMatchers;
-import org.springframework.web.reactive.result.method.RequestMappingInfoHandlerMapping;
+import org.springframework.web.reactive.HandlerMapping;
 
 /**
  * Registers a JWT-authenticated {@link SecurityWebFilterChain} into the management child
@@ -72,6 +71,8 @@ public class ReactiveManagementSecurityAutoConfiguration {
   @Order(Ordered.HIGHEST_PRECEDENCE)
   SecurityWebFilterChain managementSecurityWebFilterChain(ServerHttpSecurity http) {
     log.info("Registering JWT-authenticated SecurityWebFilterChain for the management port.");
+    var resolver = new ReactiveSupportedMethodsResolver(this::managementHandlerMappings);
+    warmer.register(resolver::warmUp);
     return http
         .securityMatcher(ServerWebExchangeMatchers.pathMatchers("/**"))
         .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
@@ -79,8 +80,11 @@ public class ReactiveManagementSecurityAutoConfiguration {
         .formLogin(FormLoginSpec::disable)
         .httpBasic(HttpBasicSpec::disable)
         .logout(LogoutSpec::disable)
+        // The same HTTP-status matrix as the main port, answered from this context's mappings.
+        .addFilterBefore(
+            new ReactiveHttpStatusMatrixFilter(resolver), SecurityWebFiltersOrder.AUTHENTICATION)
         .authorizeExchange(this::applyManagementAuthorization)
-        .exceptionHandling(this::configureDeniedHandler)
+        .exceptionHandling(handling -> configureDeniedHandler(handling, resolver))
         .oauth2ResourceServer(this::configureResourceServer)
         .build();
   }
@@ -90,20 +94,14 @@ public class ReactiveManagementSecurityAutoConfiguration {
   }
 
   /**
-   * Installs the denied-request handler on the {@code exceptionHandling} slot — which covers
-   * every authorization denial on this port, however the caller authenticated — so that a
-   * request for a method the actuator does not serve on that path is answered {@code 405}
-   * rather than {@code 403}, honouring the management section's own
-   * {@code unmatched-method-response}.
+   * Installs the RFC 6750 denied-request handler on the {@code exceptionHandling} slot, which
+   * covers every authorization denial on this port however the caller authenticated, decorated
+   * for {@code OPTIONS}; see the servlet twin.
    */
-  private void configureDeniedHandler(ExceptionHandlingSpec handling) {
-    if (properties.getManagement().getUnmatchedMethodResponse()
-        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
-      var resolver = new ReactiveSupportedMethodsResolver(this::managementHandlerMappings);
-      warmer.register(resolver::warmUp);
-      handling.accessDeniedHandler(new MethodNotAllowedServerAccessDeniedHandler(
-          new BearerTokenServerAccessDeniedHandler(), resolver));
-    }
+  private static void configureDeniedHandler(
+      ExceptionHandlingSpec handling, ReactiveSupportedMethodsResolver resolver) {
+    handling.accessDeniedHandler(
+        new OptionsServerAccessDeniedHandler(new BearerTokenServerAccessDeniedHandler(), resolver));
   }
 
   private final SupportedMethodsWarmer warmer = new SupportedMethodsWarmer();
@@ -118,20 +116,16 @@ public class ReactiveManagementSecurityAutoConfiguration {
    * The management child context's own handler mappings — the actuator's. {@code getBeansOfType}
    * rather than {@code getBeanProvider().stream()}, because the latter walks into the parent
    * context and excludes a parent bean only when this one defines another under the same name;
-   * a differently named mapping in the main context would otherwise let this port advertise the
-   * business API's verbs.
+   * a differently named mapping in the main context would otherwise let this port serve, or
+   * answer {@code 405} for, the business API's routes.
    */
-  private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
-    return applicationContext.getBeansOfType(RequestMappingInfoHandlerMapping.class)
-        .values()
-        .stream();
+  private Stream<HandlerMapping> managementHandlerMappings() {
+    return applicationContext.getBeansOfType(HandlerMapping.class).values().stream();
   }
 
   private void applyManagementAuthorization(AuthorizeExchangeSpec exchanges) {
     Management management = properties.getManagement();
-    var blacklistDenial = new ReactiveBlacklistDenial();
-    management.getBlacklist().forEach(path ->
-        exchanges.pathMatchers(path).access(blacklistDenial));
+    management.getBlacklist().forEach(path -> exchanges.pathMatchers(path).denyAll());
     management.getWhitelist().forEach(path -> exchanges.pathMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

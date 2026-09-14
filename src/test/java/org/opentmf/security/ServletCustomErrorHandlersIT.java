@@ -11,6 +11,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.api.TestInstance.Lifecycle;
+import org.opentmf.security.api.GlobalExceptionHandler;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.SpringBootTest.WebEnvironment;
 import org.springframework.boot.test.context.TestConfiguration;
@@ -138,19 +139,21 @@ class ServletCustomErrorHandlersIT {
   }
 
   /**
-   * A method the application does not implement is not an authorization question, so the library
-   * answers it and the consumer's handler is deliberately bypassed. Also the only place the
-   * {@code 405} path is exercised on a real server behind a servlet context path, which the
-   * request-path parsing has to strip before matching.
+   * A method the application does not implement is not an authorization question: the matrix
+   * answers it before authentication, so the consumer's denied handler never sees it and the
+   * body is the application's own error rendering, with no {@code Allow}. (Rewritten from the
+   * 3.0.0 case that pinned a bodiless {@code 405} with {@code Allow}.)
    */
   @Test
-  void unimplementedMethod_isAnsweredByTheLibraryAndBypassesTheCustomHandler() {
+  void unimplementedMethod_isAnsweredByTheMatrixAndRenderedByTheApplication() {
     HttpHeaders headers = new HttpHeaders();
     headers.setBearerAuth(WRITE_TOKEN);
     ResponseEntity<String> response = restTemplate.exchange(
         main("/car/Mercedes"), HttpMethod.PUT, new HttpEntity<>(headers), String.class);
     assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
-    assertThat(response.getHeaders().getFirst(HttpHeaders.ALLOW)).isNotNull();
+    assertThat(response.getHeaders().getFirst(HttpHeaders.ALLOW)).isNull();
+    assertThat(response.getHeaders().getFirst(GlobalExceptionHandler.RENDERER_HEADER))
+        .isEqualTo(GlobalExceptionHandler.RENDERER);
     assertThat(response.getBody()).isNotEqualTo(CUSTOM_403_BODY);
   }
 
