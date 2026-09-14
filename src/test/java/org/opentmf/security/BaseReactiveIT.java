@@ -84,15 +84,15 @@ abstract class BaseReactiveIT extends BaseIT {
 
   @Order(70)
   @Test
-  void testGetBlacklist_withoutToken_returnsUnauthorized() {
-    get("/blacklist").expectStatus().isUnauthorized();
+  void testGetUnmappedBlacklist_withoutToken_returnsNotFound() {
+    get("/blacklist").expectStatus().isNotFound();
   }
 
   @Order(80)
   @Test
-  void testGetBlacklist_withReadToken_returnsForbidden() {
+  void testGetUnmappedBlacklist_withReadToken_returnsNotFound() {
     var token = getToken("read");
-    get("/blacklist", token).expectStatus().isForbidden();
+    get("/blacklist", token).expectStatus().isNotFound();
   }
 
   @Order(90)

@@ -24,12 +24,22 @@ public class AccessRuleBindingAutoConfiguration {
   }
 
   /**
-   * The guard is referenced by nothing, so under {@code spring.main.lazy-initialization=true}
-   * it would never be instantiated and the check would silently not run. A security guard must
-   * not be optional-by-tuning; this pins it eager.
+   * Refuses a configuration that still sets a retired property, instead of letting Boot ignore
+   * it silently; see {@link RetiredPropertyGuard}.
    */
   @Bean
-  static LazyInitializationExcludeFilter endpointMethodCaseGuardIsNeverLazy() {
-    return LazyInitializationExcludeFilter.forBeanTypes(EndpointMethodCaseGuard.class);
+  RetiredPropertyGuard retiredPropertyGuard(Environment environment) {
+    return new RetiredPropertyGuard(environment);
+  }
+
+  /**
+   * The guards are referenced by nothing, so under {@code spring.main.lazy-initialization=true}
+   * they would never be instantiated and the checks would silently not run. A security guard
+   * must not be optional-by-tuning; this pins them eager.
+   */
+  @Bean
+  static LazyInitializationExcludeFilter accessRuleGuardsAreNeverLazy() {
+    return LazyInitializationExcludeFilter.forBeanTypes(
+        EndpointMethodCaseGuard.class, RetiredPropertyGuard.class);
   }
 }

@@ -55,14 +55,76 @@ class EndpointRulesTest {
   }
 
   @Test
-  void allowHeader_joinsWithCommaAndSpace() {
-    assertThat(EndpointRules.allowHeader(ordered(HttpMethod.GET, HttpMethod.DELETE)))
-        .isEqualTo("GET, DELETE");
+  void optionsAllowHeader_joinsWithABareComma_asSpringsOptionsHandlerDoes() {
+    assertThat(EndpointRules.optionsAllowHeader(ordered(HttpMethod.GET, HttpMethod.HEAD)))
+        .isEqualTo("GET,HEAD");
+  }
+
+  // ------------------------------------------------------------------ the matrix
+
+  @Test
+  void answerFor_aPathNoHandlerServes_isNotFound_whateverTheMethod() {
+    assertThat(EndpointRules.answerFor(HttpMethod.GET, SupportedMethods.notServed()).kind())
+        .isEqualTo(MatrixAnswer.Kind.NOT_FOUND);
+    assertThat(EndpointRules.answerFor(HttpMethod.OPTIONS, SupportedMethods.notServed()).kind())
+        .isEqualTo(MatrixAnswer.Kind.NOT_FOUND);
+    assertThat(EndpointRules.answerFor(HttpMethod.valueOf("BREW"), SupportedMethods.notServed())
+        .kind()).isEqualTo(MatrixAnswer.Kind.NOT_FOUND);
   }
 
   @Test
-  void allowHeader_whenEmpty_isEmpty() {
-    assertThat(EndpointRules.allowHeader(Set.of())).isEmpty();
+  void answerFor_aMethodThePathDoesNotImplement_isMethodNotAllowed_unknownNamesIncluded() {
+    var served = new SupportedMethods(ordered(HttpMethod.GET, HttpMethod.DELETE), false);
+
+    assertThat(EndpointRules.answerFor(HttpMethod.PUT, served).kind())
+        .isEqualTo(MatrixAnswer.Kind.METHOD_NOT_ALLOWED);
+    assertThat(EndpointRules.answerFor(HttpMethod.valueOf("PROPFIND"), served).kind())
+        .isEqualTo(MatrixAnswer.Kind.METHOD_NOT_ALLOWED);
+    assertThat(EndpointRules.answerFor(HttpMethod.PUT, served).allow()).isEmpty();
+  }
+
+  @Test
+  void answerFor_anImplementedMethod_proceeds() {
+    var served = new SupportedMethods(ordered(HttpMethod.GET, HttpMethod.DELETE), false);
+
+    assertThat(EndpointRules.answerFor(HttpMethod.DELETE, served).kind())
+        .isEqualTo(MatrixAnswer.Kind.PROCEED);
+  }
+
+  /** Spring serves {@code HEAD} from the {@code GET} handler, so the matrix must too. */
+  @Test
+  void answerFor_headOnAGetPath_proceeds() {
+    var served = new SupportedMethods(ordered(HttpMethod.GET), false);
+
+    assertThat(EndpointRules.answerFor(HttpMethod.HEAD, served).kind())
+        .isEqualTo(MatrixAnswer.Kind.PROCEED);
+  }
+
+  @Test
+  void answerFor_aMappingThatNamesNoMethod_proceedsForEveryMethod() {
+    var served = new SupportedMethods(Set.of(), true);
+
+    assertThat(EndpointRules.answerFor(HttpMethod.valueOf("BREW"), served).kind())
+        .isEqualTo(MatrixAnswer.Kind.PROCEED);
+  }
+
+  @Test
+  void answerFor_plainOptions_isSpringsOptionsAnswer() {
+    var served = new SupportedMethods(ordered(HttpMethod.GET, HttpMethod.POST), false);
+
+    MatrixAnswer answer = EndpointRules.answerFor(HttpMethod.OPTIONS, served);
+
+    assertThat(answer.kind()).isEqualTo(MatrixAnswer.Kind.OPTIONS);
+    assertThat(answer.allow())
+        .containsExactly(HttpMethod.GET, HttpMethod.HEAD, HttpMethod.POST, HttpMethod.OPTIONS);
+  }
+
+  @Test
+  void answerFor_optionsTheApplicationMapsItself_proceeds() {
+    var served = new SupportedMethods(ordered(HttpMethod.GET, HttpMethod.OPTIONS), false);
+
+    assertThat(EndpointRules.answerFor(HttpMethod.OPTIONS, served).kind())
+        .isEqualTo(MatrixAnswer.Kind.PROCEED);
   }
 
   private static Endpoint endpoint(EndpointMethod method) {

@@ -100,7 +100,6 @@ All properties live under the `opentmf.security` prefix.
 | `whitelist` | *(empty)* | List of path patterns that bypass security for all HTTP methods. |
 | `blacklist` | *(empty)* | List of path patterns denied for all HTTP methods. |
 | `other-endpoints` | `deny` | Catch-all policy for unmatched requests: `allow` (permit anonymously), `deny` (reject — historical default, preserves backward compatibility), `authenticated` (require any valid JWT). |
-| `unmatched-method-response` | `method-not-allowed` | How to answer a denied request whose path the application serves but not with that HTTP method: `method-not-allowed` (405 with an `Allow` header) or `deny` (403, as before 3.0.0). See [HTTP method semantics](#http-method-semantics). |
 
 ### Nested claims
 
@@ -348,11 +347,13 @@ Convergence happens at the renderer instead of the dispatch path — same single
 
 | Scenario | Status | Handled by | Rendered by (when customized) |
 |---|---|---|---|
+| No handler serves the path | 404 | This library, before authentication — see [The HTTP-status matrix](#the-http-status-matrix) | your `HandlerExceptionResolver`s / `WebExceptionHandler`s, as for any `NoHandlerFoundException` |
+| Path exists, method not implemented on it | 405 (no `Allow`) | This library, before authentication | same — as for any `HttpRequestMethodNotSupportedException` / `MethodNotAllowedException` |
 | No token on a protected URL | 401 | `ExceptionTranslationFilter` / `ExceptionTranslationWebFilter` | entry point |
 | Invalid / expired / malformed token | 401 | Bearer-token filter | entry point |
 | Invalid token on a **`permitAll`** URL | 401 | Bearer-token filter — a present-but-bad token is always authenticated | entry point |
-| Valid token, insufficient role, method **is** implemented | 403 | `AuthorizationFilter` → exception translation | access-denied handler |
-| Valid token, method **is not** implemented on that path | 405 (200 for `OPTIONS`) | This library, before the access-denied handler — see [HTTP method semantics](#http-method-semantics) | **nobody**: the library writes it and your handler is not invoked |
+| Valid token, insufficient role | 403 | `AuthorizationFilter` → exception translation | access-denied handler |
+| Valid token, plain `OPTIONS` the rules deny | 200 + `Allow` | This library, decorating the access-denied handler | **nobody**: the library writes it and your handler is not invoked |
 | **Anonymous** request on a `denyAll` / blacklisted URL | 401 (not 403!) | Exception translation treats anonymous denials as authentication failures | entry point |
 | `@PreAuthorize` denial inside a handler method | 403 | Reaches your `@RestControllerAdvice` as `AccessDeniedException` | your advice (unchanged by this feature) |
 
@@ -360,13 +361,92 @@ Convergence happens at the renderer instead of the dispatch path — same single
 
 A consumer-supplied entry point or denied handler applies to the **main port only**. The management-port chain keeps the RFC 6750 defaults (status + `WWW-Authenticate`, empty body): it serves probes and scrapers that read status codes, not bodies.
 
-That is about *custom rendering*, not about status codes. The management port does follow the method semantics below — `opentmf.security.management.unmatched-method-response` defaults to `method-not-allowed` just like the main port, so a denied request there for a method the actuator does not serve answers **405** (or **200** for `OPTIONS`), not 403. If you alert on 403s from the management port, add 405 to the alert or set that property to `deny`.
+That is about *custom rendering*, not about status codes. The management port follows the same [HTTP-status matrix](#the-http-status-matrix) as the main port, answered from the management context's own handler mappings: an actuator path that is not exposed answers **404**, a method the actuator does not serve on an exposed path **405**, and only then 401/403. Its 404/405 bodies are rendered through the management context's exception resolvers, which on the servlet stack walk up to the main context's — so your `@ControllerAdvice` renders them there too. If you alert on 401/403s from the management port, add 404 and 405 to the alert.
 
-## HTTP method semantics
+## The HTTP-status matrix
 
 Access rules are deployment configuration; the controllers are the code. When the two disagree
 about *why* a request cannot be served, this library answers from the code, because that is what
-the caller is actually asking about.
+the caller is actually asking about. Since 3.1.0 that answer is a fixed matrix, evaluated in this
+order for **every** request — before authentication, before the access rules, on both stacks and
+on both ports — and it is not configurable:
+
+| # | condition | answer |
+|---|---|---|
+| 1 | no handler serves the path | **404** — anonymous or authenticated |
+| 2 | the path is served, the HTTP method is not implemented on it — unknown method names (`PROPFIND`, `BREW`, …) included | **405**, with **no `Allow` header** |
+| 3 | path and method exist; no token, or an invalid one | **401** |
+| 4 | a valid token whose roles do not satisfy the rule | **403** |
+
+```
+GET  /nope                  -> 404   (with or without a token)
+PUT  /car/{id}              -> 405   (the resource has GET and DELETE; no Allow header)
+BREW /car                   -> 405   (unknown method name, same answer)
+GET  /car/{id}   no token   -> 401
+GET  /car/{id}   role-less  -> 403
+```
+
+Whitelisted, blacklisted and rule-less paths are all subject to rows 1 and 2 first: a whitelisted
+prefix with no handler behind it is still 404, and an unimplemented method on a blacklisted path
+is still 405. The rules only ever see a request whose path and method both exist.
+
+### What "the path is served" means
+
+The library consults the same `HandlerMapping`s the `DispatcherServlet` / `DispatcherHandler`
+dispatches with, in the same order, and stops at the first that claims the path — exactly as the
+dispatcher would. Annotation-based controllers are matched on the path alone, so their declared
+methods are known without a method-mismatch; functional routes, resource handlers and any other
+`HandlerMapping` are asked for a handler the way the dispatcher asks them. Two details worth
+knowing:
+
+- **Static resources.** Boot maps a resource handler to `/**` by default, which would make every
+  path "served". A resource handler therefore claims a path only when the resource actually
+  resolves, through the handler's own resolvers and locations — `/swagger-ui/index.html` exists,
+  `/nope` does not — and it implements `GET` and `HEAD`, so `POST /probe.txt` is 405.
+- **A method-less `@RequestMapping`** accepts every method, so nothing is ever 405 on it.
+
+A request the container dispatches to a servlet other than Spring MVC's — an H2 console, a JAX-RS
+or SOAP engine — is not the matrix's to answer: it goes straight to the access rules and to that
+servlet. And should the handler mappings be unreadable for a request (a context still starting,
+a lookup failure), the request is likewise left to the rules rather than answered from a guess.
+
+### The body is the application's own
+
+The 404 and 405 are rendered by handing the application the very exceptions Spring would raise —
+`NoHandlerFoundException` and `HttpRequestMethodNotSupportedException` (servlet), a
+`ResponseStatusException` and `MethodNotAllowedException` (reactive) — through the same
+`HandlerExceptionResolver`s / `WebExceptionHandler`s the dispatcher renders through. A
+`@RestControllerAdvice extends ResponseEntityExceptionHandler`, a `ProblemDetail` handler or a
+TMF-`Error` renderer answers these exactly the way it answers everything else, on the management
+port too. The 405 exception names **no supported methods**, so no resolver can derive an `Allow`
+from it.
+
+An application with no error rendering of its own gets what it would get natively: Spring's
+default resolver and, on the servlet stack, the container's error page — which in a Boot
+application is Boot's default error JSON. If you want the matrix's bodies to be yours, render
+`NoHandlerFoundException` and `HttpRequestMethodNotSupportedException` (or the reactive
+`ResponseStatusException`s) in your error handler; the DNMS service template does.
+
+### Plain `OPTIONS`
+
+Spring answers a plain `OPTIONS` on any mapped path with `200` and an `Allow` header, so the
+matrix treats `OPTIONS` as an existing method: it follows rows 3 and 4. Without a token it is
+**401**; with a valid token it gets **Spring's own answer** — `200` and the `Allow` Spring's
+`HttpOptionsHandler` would send (the declared methods, plus `HEAD` where `GET` is declared, plus
+`OPTIONS`) — whether the rules permit the path (Spring answers natively) or deny it (the library
+answers, decorating the access-denied handler, and your handler is not invoked for it). `OPTIONS`
+the application maps itself is left to the application. The `Allow` ban is for 405 only; the
+method set behind a protected path is still only read with a token.
+
+### Unknown method names and the firewall
+
+Spring Security's strict firewall rejects an HTTP method it does not know with **400** before any
+filter runs. This library registers an `HttpFirewall` (`StrictHttpFirewall`) on the servlet stack
+and a `ServerWebExchangeFirewall` on the reactive stack with `setUnsafeAllowAnyHttpMethod(true)`,
+so that `PROPFIND` or `BREW` reach the matrix and are answered 404 or 405 like any other method.
+Nothing else the firewall guards changes. If you define your own firewall bean it takes
+precedence, and unknown method names keep whatever answer it gives. `TRACE` is the container's:
+Tomcat refuses it before any filter runs, with headers of its own.
 
 ### `GET` rules cover `HEAD`
 
@@ -386,17 +466,17 @@ Spring MVC and WebFlux both serve a `HEAD` request from the handler mapped to `G
 showed up as 403s from monitoring agents, reverse proxies and health checkers. This is not
 optional and there is no property to turn it off.
 
-> **Upgrading: this tightens as well as loosens.** Because a `GET` rule never matched `HEAD`
-> before, a `HEAD` request fell through to `other-endpoints` — served anonymously under `allow`,
-> or accepted with any valid token under `authenticated`. It now carries the `GET` rule's roles,
-> so a probe that relied on that fall-through gets **401** (anonymous) or **403** (token without
-> the role). The management section defaults to `other-endpoints: authenticated`, so a
-> role-restricted management `GET` rule tightens `HEAD` there by default. Give the probe the
-> role, or `whitelist` the path.
+> **Upgrading from 2.x: this tightens as well as loosens.** Because a `GET` rule never matched
+> `HEAD` before, a `HEAD` request fell through to `other-endpoints` — served anonymously under
+> `allow`, or accepted with any valid token under `authenticated`. It now carries the `GET` rule's
+> roles, so a probe that relied on that fall-through gets **401** (anonymous) or **403** (token
+> without the role). The management section defaults to `other-endpoints: authenticated`, so a
+> role-restricted management `GET` rule tightens `HEAD` there by default. Give the probe the role,
+> or `whitelist` the path.
 
-Method values must be spelled **exactly** as the constants above; any spelling that differs but
-would still bind through Boot's lenient conversion — `get`, `G-E-T`, a stray space — fails at
-startup with a message naming the entry. This strictness exists for upgraders: before 3.0.0 the value
+Method values must be spelled **exactly** as the constants; any spelling that differs but would
+still bind through Boot's lenient conversion — `get`, `G-E-T`, a stray space — fails at startup
+with a message naming the entry. This strictness exists for upgraders: before 3.0.0 the value
 bound through `HttpMethod.valueOf`, which preserves case, and the request matchers compare verbs
 by exact string — so a lowercase rule silently never matched and its path fell through to
 `other-endpoints`. Boot's relaxed enum binding would have brought such a dead rule to life on
@@ -406,82 +486,31 @@ library refuses to guess: fix the case after reviewing that the rule is actually
 For the same reason `method` accepts only **`GET`, `POST`, `PUT`, `PATCH`, `DELETE`**. `HEAD` is
 implied by `GET`; allowing it to be named separately would let a configuration declare different
 roles for the two, of which only the first registered would ever apply. `OPTIONS` and `TRACE` are
-rejected too — see below.
+rejected too — `OPTIONS` is answered by the matrix above, and `TRACE` belongs to the container.
 
-### 405 instead of 403 for a method the application does not implement
+### Retired: `unmatched-method-response`
 
-A caller who sends `PUT` to a resource that only supports `GET` and `DELETE` gets:
-
-```
-HTTP/1.1 405 Method Not Allowed
-Allow: GET, DELETE
-```
-
-rather than a `403` implying they lack permission for something that does not exist. A plain
-`OPTIONS` request is answered `200 OK` with the same header. The advertised methods come from the
-application's handler mappings — the same ones Spring dispatches with — so the header says what
-the resource genuinely supports.
-
-**A method the application *does* implement stays `403`.** If `DELETE /car/{id}` exists in code
-and the access rules withhold it, that is an authorization answer and it is left alone.
-Relabelling it `405` would tell the caller the endpoint does not exist when it does.
-
-Set `unmatched-method-response: deny` to answer every denial with `403` as releases before 3.0.0
-did — for a deployment that would rather not disclose which methods it implements, or a consumer
-whose clients depend on the old status.
-
-Details worth knowing:
-
-- **Never without a token.** An anonymous request keeps its `401`. The method surface is only
-  ever disclosed to a caller who already authenticated, and who can already read the OAS.
-- **`Allow` describes the resource, not the caller.** It is not filtered by the caller's roles,
-  which is what RFC 9110 specifies. Its methods appear in a fixed canonical order — `GET, HEAD,
-  POST, PUT, PATCH, DELETE, OPTIONS, TRACE`, the last two only when the application itself maps
-  them — deterministic run after run and identical on both stacks, so contract tests can compare
-  the header exactly.
-- **Any authenticated caller, not only bearer.** The decision sits on the exception-translation
-  path, so it applies however the request authenticated — an application that adds its own
-  pre-authentication mechanism beside this library gets the same answers. Without a
-  consumer-supplied handler, the remaining `403` denials of such callers also take the RFC 6750
-  shape (status + `WWW-Authenticate`, empty body) rather than the framework's default error page.
-- **Blacklisted paths answer `403` uniformly**, with no `Allow` header. An explicitly closed path
-  discloses nothing about itself.
-- **The response has no body, and your `AccessDeniedHandler` does not see it.** The library
-  writes these responses itself; a consumer-supplied handler still renders every other denial,
-  including the `403` cases above. **If that handler is also where you audit denied requests,
-  405/200 responses will not reach your audit log** — hook the audit somewhere that sees them,
-  or set `unmatched-method-response: deny`.
-- **Only annotation-based controllers are consulted.** A path served solely by a functional route
-  or a resource handler keeps answering `403`. Controllers still mapped through the deprecated
-  Ant-style matching are covered, resolved with the `UrlPathHelper` the application configured.
-- **Both ports.** `opentmf.security.management.unmatched-method-response` is the management-port
-  twin, with the same default. It rarely comes into play while `management.other-endpoints`
-  keeps its `authenticated` default, since unmatched requests then reach the actuator, which
-  answers for itself.
+3.0.0's `unmatched-method-response` (`method-not-allowed` / `deny`, on both sections) chose between
+405 and a uniform 403 for a method the application does not implement. The matrix is not
+configurable, so the property is gone — and because Boot ignores an unknown property without a
+word, a configuration that still sets it **fails at startup** with a message saying so, rather than
+silently losing the opt-out it thought it had. Remove the property.
 
 ### CORS pre-flight is a different problem
 
 `OPTIONS` cannot be named in the access rules, and for a CORS pre-flight it does not need to be.
-A pre-flight is answered before the security chain sees it when CORS is configured, and when it
-is *not* configured no access rule can help: a browser needs `Access-Control-Allow-Origin`,
-which only a `CorsConfigurationSource` bean (or MVC `addCorsMappings`) can produce. **If your
-service is called from a browser on another origin, configure CORS** — this library will not
-make pre-flight work, on either stack.
+Where CORS is configured, the pre-flight is answered by Spring's CORS filter before the matrix or
+the rules see it; where it is *not* configured, a pre-flight is a plain `OPTIONS` to the matrix
+(401 without a token) and no access rule could help anyway: a browser needs
+`Access-Control-Allow-Origin`, which only a `CorsConfigurationSource` bean (or MVC
+`addCorsMappings`) can produce. **If your service is called from a browser on another origin,
+configure CORS** — this library will not make pre-flight work, on either stack.
 
-> **The one case with no direct replacement: anonymous plain `OPTIONS`.** A gateway or health
-> checker that probes with `OPTIONS` and *no token* used to be served by an
-> `allowed-endpoints` entry for `OPTIONS`. That entry no longer binds, and the 405/200 handling
-> above never applies to an anonymous caller — those denials go to the entry point as `401`, by
-> design, so that the method surface stays behind a token. CORS configuration is irrelevant to a
-> non-browser probe. The only replacement is a `whitelist` entry for the path, which is
-> **strictly broader**: it opens every method there anonymously. If that is too broad, the probe
-> has to present a token. Anonymous `OPTIONS` is deliberately not supported.
-
-The two stacks also differ here, which is worth knowing when comparing them. On servlet, Spring's
-`CorsFilter` terminates a pre-flight before the security chain runs, so an unconfigured service
-answers `200` with no CORS headers. On reactive no CORS filter is installed at all without a
-`CorsConfigurationSource` bean, so the pre-flight reaches the security chain. Configuring CORS
-makes both behave the same.
+The two stacks differ here, which is worth knowing when comparing them. On servlet, Spring's
+`CorsFilter` is always installed and terminates a pre-flight before the security chain runs, so an
+unconfigured service answers `200` with no CORS headers. On reactive no CORS filter is installed
+without a `CorsConfigurationSource` bean, so the pre-flight reaches the matrix and the rules.
+Configuring CORS makes both behave the same.
 
 ## Changelog
 

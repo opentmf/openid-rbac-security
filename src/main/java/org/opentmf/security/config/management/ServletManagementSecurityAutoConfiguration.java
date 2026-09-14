@@ -7,9 +7,9 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.opentmf.security.config.BlacklistDecision;
 import org.opentmf.security.config.EndpointRules;
-import org.opentmf.security.config.MethodNotAllowedAccessDeniedHandler;
+import org.opentmf.security.config.OptionsAccessDeniedHandler;
+import org.opentmf.security.config.ServletHttpStatusMatrixFilter;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletJwtSupport;
 import org.opentmf.security.config.ServletSupportedMethodsResolver;
@@ -17,7 +17,6 @@ import org.opentmf.security.config.SupportedMethodsWarmer;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
-import org.opentmf.security.model.UnmatchedMethodResponse;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnClass;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
@@ -30,7 +29,6 @@ import org.springframework.context.event.EventListener;
 import org.springframework.core.Ordered;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.authorization.SingleResultAuthorizationManager;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AuthorizeHttpRequestsConfigurer;
 import org.springframework.security.config.annotation.web.configurers.CsrfConfigurer;
@@ -39,11 +37,11 @@ import org.springframework.security.config.annotation.web.configurers.FormLoginC
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.SecurityFilterChain;
-import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
-import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * Registers a JWT-authenticated {@link SecurityFilterChain} for the management port into the
@@ -101,6 +99,8 @@ public class ServletManagementSecurityAutoConfiguration {
   @Order(Ordered.HIGHEST_PRECEDENCE)
   SecurityFilterChain managementSecurityFilterChain(HttpSecurity http) {
     log.info("Registering JWT-authenticated SecurityFilterChain for the management port.");
+    var resolver = new ServletSupportedMethodsResolver(this::managementHandlerMappings);
+    warmer.register(resolver::warmUp);
     return http
         .securityMatcher(this::isManagementPortRequest)
         .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
@@ -108,8 +108,12 @@ public class ServletManagementSecurityAutoConfiguration {
         .formLogin(FormLoginConfigurer::disable)
         .httpBasic(HttpBasicConfigurer::disable)
         .logout(LogoutConfigurer::disable)
+        // The same HTTP-status matrix as the main port, answered from the management context.
+        .addFilterBefore(
+            new ServletHttpStatusMatrixFilter(resolver, this::managementExceptionResolvers),
+            BearerTokenAuthenticationFilter.class)
         .authorizeHttpRequests(this::applyManagementAuthorization)
-        .exceptionHandling(this::configureDeniedHandler)
+        .exceptionHandling(handling -> configureDeniedHandler(handling, resolver))
         .oauth2ResourceServer(this::configureResourceServer)
         .build();
   }
@@ -124,20 +128,17 @@ public class ServletManagementSecurityAutoConfiguration {
   }
 
   /**
-   * Installs the denied-request handler on the {@code exceptionHandling} slot — which covers
-   * every authorization denial on this port, however the caller authenticated — so that a
-   * request for a method the actuator does not serve on that path is answered {@code 405}
-   * rather than {@code 403}, honouring the management section's own
-   * {@code unmatched-method-response}.
+   * Installs the RFC 6750 denied-request handler on the {@code exceptionHandling} slot, which
+   * covers every authorization denial on this port however the caller authenticated, so that
+   * every {@code 403} here takes the same shape (status plus {@code WWW-Authenticate}, empty
+   * body) rather than the framework's default error page for a non-bearer caller — decorated so
+   * that an authenticated plain {@code OPTIONS} gets Spring's own answer, as on the main port.
    */
-  private void configureDeniedHandler(ExceptionHandlingConfigurer<HttpSecurity> handling) {
-    if (properties.getManagement().getUnmatchedMethodResponse()
-        == UnmatchedMethodResponse.METHOD_NOT_ALLOWED) {
-      var resolver = new ServletSupportedMethodsResolver(this::managementHandlerMappings);
-      warmer.register(resolver::warmUp);
-      handling.accessDeniedHandler(new MethodNotAllowedAccessDeniedHandler(
-          new BearerTokenAccessDeniedHandler(), resolver));
-    }
+  private static void configureDeniedHandler(
+      ExceptionHandlingConfigurer<HttpSecurity> handling,
+      ServletSupportedMethodsResolver resolver) {
+    handling.accessDeniedHandler(
+        new OptionsAccessDeniedHandler(new BearerTokenAccessDeniedHandler(), resolver));
   }
 
   private final SupportedMethodsWarmer warmer = new SupportedMethodsWarmer();
@@ -152,40 +153,45 @@ public class ServletManagementSecurityAutoConfiguration {
    * The handler mappings of the management child context — the one that actually dispatches
    * management-port requests. This chain lives in the main context (see the class javadoc), so
    * the main context's own mappings are the wrong ones to consult: they describe the business
-   * API, not the actuator, and answering a management-port request from them would advertise
-   * methods that port does not serve. The child context is captured from the same
-   * {@link WebServerInitializedEvent} the port comes from, and read only on the first denial,
+   * API, not the actuator, and answering a management-port request from them would serve, or
+   * answer {@code 405} for, routes that port does not have. The child context is captured from
+   * the same {@link WebServerInitializedEvent} the port comes from, and read only on first use,
    * long after that event.
    */
-  private Stream<RequestMappingInfoHandlerMapping> managementHandlerMappings() {
-    ManagementServer server = managementServer.get();
-    if (server == null) {
-      // Not ready yet. Throwing rather than returning an empty stream matters: the resolver
-      // caches its snapshot on first success and SingletonSupplier caches successes but not
-      // failures, so an empty snapshot taken during startup would disable this port's method
-      // semantics for the life of the process. A throw costs one denial and is retried.
-      throw new IllegalStateException("The management context has not been initialized yet.");
-    }
+  private Stream<HandlerMapping> managementHandlerMappings() {
     // getBeansOfType, not getBeanProvider().stream(): the latter walks into ancestor contexts
     // and excludes a parent bean only when the child happens to define one under the same name.
-    // The main context's mappings describe the business API, and answering a management-port
-    // denial from them would advertise verbs this port does not serve.
-    return server.context()
-        .getBeansOfType(RequestMappingInfoHandlerMapping.class)
-        .values()
-        .stream();
+    // It is also exactly what Boot's child dispatcher consults — its composite mapping
+    // collects the child's own HandlerMapping beans the same way.
+    return managementContext().getBeansOfType(HandlerMapping.class).values().stream();
+  }
+
+  /**
+   * The exception resolvers the child dispatcher renders through: Boot's composite, which
+   * itself walks up to the main context's resolvers, so the application's own error rendering
+   * answers on this port too.
+   */
+  private Stream<HandlerExceptionResolver> managementExceptionResolvers() {
+    return managementContext().getBeansOfType(HandlerExceptionResolver.class).values().stream();
+  }
+
+  private ApplicationContext managementContext() {
+    ManagementServer server = managementServer.get();
+    if (server == null) {
+      // Not ready yet. Throwing rather than returning an empty context matters: the lookups
+      // cache their first success and SingletonSupplier caches successes but not failures, so
+      // an empty snapshot taken during startup would disable this port's matrix for the life
+      // of the process. A throw costs one request and is retried.
+      throw new IllegalStateException("The management context has not been initialized yet.");
+    }
+    return server.context();
   }
 
   private void applyManagementAuthorization(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry
           requests) {
     Management management = properties.getManagement();
-    // Spring's own constant-result manager, denying with the recognisable BlacklistDecision.
-    var blacklistDenial =
-        new SingleResultAuthorizationManager<RequestAuthorizationContext>(
-            BlacklistDecision.INSTANCE);
-    management.getBlacklist().forEach(path ->
-        requests.requestMatchers(path).access(blacklistDenial));
+    management.getBlacklist().forEach(path -> requests.requestMatchers(path).denyAll());
     management.getWhitelist().forEach(path -> requests.requestMatchers(path).permitAll());
     management.getAllowedEndpoints().forEach(endpoint -> {
       for (HttpMethod method : EndpointRules.httpMethodsFor(endpoint)) {

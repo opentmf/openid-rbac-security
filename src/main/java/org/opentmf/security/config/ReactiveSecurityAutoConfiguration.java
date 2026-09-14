@@ -7,9 +7,10 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
-import org.opentmf.security.model.UnmatchedMethodResponse;
+import org.springframework.beans.factory.BeanFactoryUtils;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -27,13 +28,16 @@ import org.springframework.security.config.web.server.ServerHttpSecurity.FormLog
 import org.springframework.security.config.web.server.ServerHttpSecurity.HttpBasicSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.LogoutSpec;
 import org.springframework.security.config.web.server.ServerHttpSecurity.OAuth2ResourceServerSpec;
+import org.springframework.security.config.web.server.SecurityWebFiltersOrder;
 import org.springframework.security.oauth2.server.resource.web.access.server.BearerTokenServerAccessDeniedHandler;
 import org.springframework.security.web.server.SecurityWebFilterChain;
 import org.springframework.security.web.server.ServerAuthenticationEntryPoint;
 import org.springframework.security.web.server.authorization.ServerAccessDeniedHandler;
+import org.springframework.security.web.server.firewall.ServerWebExchangeFirewall;
+import org.springframework.security.web.server.firewall.StrictServerWebExchangeFirewall;
 import org.springframework.security.web.server.savedrequest.NoOpServerRequestCache;
 import org.springframework.util.CollectionUtils;
-import org.springframework.web.reactive.result.method.RequestMappingInfoHandlerMapping;
+import org.springframework.web.reactive.HandlerMapping;
 
 /**
  * OpenTMF Reactive Security configures according to the supplied OpenTmfSecurityProperties.
@@ -62,11 +66,28 @@ public class ReactiveSecurityAutoConfiguration {
     return warmer;
   }
 
+  /**
+   * Lets every HTTP method name into the chain, so that an unknown one ({@code PROPFIND},
+   * {@code BREW}) reaches the status matrix and is answered {@code 404} or {@code 405} like any
+   * other method, instead of being rejected as {@code 400} by the firewall before any filter
+   * runs; the reactive twin of the servlet firewall bean, picked up by every
+   * {@code WebFilterChainProxy} including the management port's. Everything else the strict
+   * firewall guards is left as it is, and a consumer's own bean takes precedence.
+   */
+  @Bean
+  @ConditionalOnMissingBean(ServerWebExchangeFirewall.class)
+  ServerWebExchangeFirewall anyMethodNameServerWebExchangeFirewall() {
+    var firewall = new StrictServerWebExchangeFirewall();
+    firewall.setUnsafeAllowAnyHttpMethod(true);
+    return firewall;
+  }
+
   @Bean
   SecurityWebFilterChain reactiveSecurityFilterChain(ServerHttpSecurity http) {
     var entryPoint = resolveUnique(authenticationEntryPoints, ServerAuthenticationEntryPoint.class);
     var accessDeniedHandler = resolveUnique(accessDeniedHandlers, ServerAccessDeniedHandler.class);
-    var deniedHandlers = new DeniedHandlers(accessDeniedHandler);
+    var resolver = new ReactiveSupportedMethodsResolver(this::handlerMappings);
+    warmer.register(resolver::warmUp);
     return http
         .requestCache(cache -> cache.requestCache(NoOpServerRequestCache.getInstance()))
         .csrf(CsrfSpec::disable)
@@ -75,65 +96,46 @@ public class ReactiveSecurityAutoConfiguration {
         .logout(LogoutSpec::disable)
         .headers(withDefaults())
         .cors(withDefaults())
+        // Before authentication: an unknown path is 404 and an unimplemented method 405 for
+        // every caller, token or no token, valid or not — the access rules see the rest.
+        .addFilterBefore(
+            new ReactiveHttpStatusMatrixFilter(resolver), SecurityWebFiltersOrder.AUTHENTICATION)
         .authorizeExchange(applyOpenTmfSecurityDefinitions())
         .exceptionHandling(handling ->
-            configureExceptionHandling(handling, entryPoint, deniedHandlers))
+            configureExceptionHandling(handling, entryPoint, accessDeniedHandler, resolver))
         .oauth2ResourceServer(configureResourceServer(entryPoint))
         .build();
   }
 
   /**
-   * The denied-request handler for one chain, decided once and installed on the
-   * {@code exceptionHandling} slot, which covers every authorization denial regardless of how
-   * the caller authenticated. See the servlet twin for why decorating only the bearer-token
-   * slot would make the documented 405 behavior depend on how the request authenticated.
+   * The handler mappings this context's {@code DispatcherHandler} dispatches with — which, for
+   * the main context, includes a parent context's, exactly as the dispatcher's own detection
+   * does.
    */
-  private final class DeniedHandlers {
-
-    private final ServerAccessDeniedHandler global;
-
-    private DeniedHandlers(ServerAccessDeniedHandler consumerHandler) {
-      boolean methodAware = openTmfSecurityProperties.getUnmatchedMethodResponse()
-          == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
-      if (!methodAware) {
-        this.global = consumerHandler;
-        return;
-      }
-      ServerAccessDeniedHandler delegate = (consumerHandler != null)
-          ? consumerHandler
-          : new BearerTokenServerAccessDeniedHandler();
-      var resolver =
-          new ReactiveSupportedMethodsResolver(ReactiveSecurityAutoConfiguration.this::mappings);
-      warmer.register(resolver::warmUp);
-      this.global = new MethodNotAllowedServerAccessDeniedHandler(delegate, resolver);
-    }
-  }
-
-  /**
-   * The handler mappings of this context and no other. A lookup that reached into a parent
-   * context would let this chain answer for routes it does not serve.
-   */
-  private Stream<RequestMappingInfoHandlerMapping> mappings() {
-    return applicationContext.getBeansOfType(RequestMappingInfoHandlerMapping.class)
+  private Stream<HandlerMapping> handlerMappings() {
+    return BeanFactoryUtils.beansOfTypeIncludingAncestors(applicationContext, HandlerMapping.class)
         .values()
         .stream();
   }
 
   /**
-   * Applies the consumer-supplied handlers on the {@code ExceptionTranslationWebFilter} path: an
-   * anonymous request hitting a protected URL (401) and authorization denials for authenticated
-   * users (403). Leaving a handler unset keeps that path on the Spring Security default.
+   * Applies the handlers on the {@code ExceptionTranslationWebFilter} path: an anonymous request
+   * hitting a protected URL (401) and authorization denials for authenticated users (403).
+   * Leaving the entry point unset keeps that path on the Spring Security default; the denied
+   * handler is always set and decorated for {@code OPTIONS}, for the reasons the servlet twin
+   * gives.
    */
-  private void configureExceptionHandling(
+  private static void configureExceptionHandling(
       ExceptionHandlingSpec handling,
       ServerAuthenticationEntryPoint entryPoint,
-      DeniedHandlers deniedHandlers) {
+      ServerAccessDeniedHandler consumerHandler,
+      ReactiveSupportedMethodsResolver resolver) {
     if (entryPoint != null) {
       handling.authenticationEntryPoint(entryPoint);
     }
-    if (deniedHandlers.global != null) {
-      handling.accessDeniedHandler(deniedHandlers.global);
-    }
+    ServerAccessDeniedHandler delegate =
+        consumerHandler != null ? consumerHandler : new BearerTokenServerAccessDeniedHandler();
+    handling.accessDeniedHandler(new OptionsServerAccessDeniedHandler(delegate, resolver));
   }
 
   /**
@@ -142,7 +144,8 @@ public class ReactiveSecurityAutoConfiguration {
    * on the bearer-token path: invalid / expired / malformed tokens (401), which the bearer
    * {@code AuthenticationWebFilter} handles before the {@code ExceptionTranslationWebFilter}
    * ever sees them. Denials are not configured here: the denied-request handler lives on the
-   * {@code exceptionHandling} slot, which covers this path too — see {@link DeniedHandlers}.
+   * {@code exceptionHandling} slot, which covers this path too — see
+   * {@link #configureExceptionHandling}.
    */
   private Customizer<OAuth2ResourceServerSpec> configureResourceServer(
       ServerAuthenticationEntryPoint entryPoint) {
@@ -191,7 +194,7 @@ public class ReactiveSecurityAutoConfiguration {
   private void configureBlacklist(AuthorizeExchangeSpec exchanges) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
       exchanges.pathMatchers(openTmfSecurityProperties.getBlacklist().toArray(String[]::new))
-          .access(new ReactiveBlacklistDenial());
+          .denyAll();
     }
   }
 

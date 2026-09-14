@@ -8,25 +8,27 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.annotation.AnnotationAwareOrderComparator;
 import org.springframework.util.function.SingletonSupplier;
 
 /**
- * Captures the handler-mapping beans once, lazily, and serves their mapping infos through a
- * briefly cached view.
+ * Captures the handler-mapping beans once, lazily, in the order the dispatcher consults them,
+ * and serves the annotation mappings' infos through a briefly cached view.
  *
  * <p>The bean lookup happens once and can be {@linkplain #warmUp() primed} off the request
  * path. The infos are re-read so that mappings registered or removed at runtime are answered
  * for — but reading them costs a locked copy of the entire registry per mapping bean, and the
- * denial path is attacker-reachable, so the read is cached for one second: fresh enough that a
+ * lookup runs on every request, so the read is cached for one second: fresh enough that a
  * runtime-registered mapping is visible almost immediately, cheap enough that a probe storm
  * cannot turn registry copies into a CPU amplifier on, for the reactive stack, an event-loop
- * thread.
+ * thread. Mappings that are not annotation-based carry no infos; the resolvers ask them
+ * directly, per request.
  *
  * <p>Shared by both stacks' resolvers, which is why it is generic over the mapping and info
  * types and names no web type of its own: the servlet and reactive halves of this library must
  * stay loadable when the other stack is absent from the classpath.
  *
- * @param <T> the stack's {@code RequestMappingInfoHandlerMapping} type
+ * @param <T> the stack's {@code HandlerMapping} type
  * @param <I> the stack's {@code RequestMappingInfo} type
  * @author Gokhan Demir
  */
@@ -39,7 +41,10 @@ class HandlerMappingLookup<T, I> {
   private final Function<T, Collection<I>> infosOf;
   private final AtomicReference<Cached<T, I>> cached = new AtomicReference<>();
 
-  /** One mapping bean together with the infos it held when the view was taken. */
+  /**
+   * One mapping bean together with the infos it held when the view was taken — empty for a
+   * mapping that is not annotation-based.
+   */
   record Entry<T, I>(T mapping, Collection<I> infos) {}
 
   private record Cached<T, I>(List<Entry<T, I>> entries, long takenAtNanos) {}
@@ -47,13 +52,14 @@ class HandlerMappingLookup<T, I> {
   HandlerMappingLookup(Supplier<Stream<T>> handlerMappings, Function<T, Collection<I>> infosOf) {
     this.infosOf = infosOf;
     this.beans = SingletonSupplier.of(() -> {
-      List<T> list = handlerMappings.get().toList();
+      // The dispatcher's own order: the first mapping to claim a path answers for it.
+      List<T> list = handlerMappings.get().sorted(AnnotationAwareOrderComparator.INSTANCE).toList();
       log.debug("Captured {} handler mappings for HTTP method resolution.", list.size());
       return list;
     });
   }
 
-  /** The mapping beans with their current infos, at most one second stale. */
+  /** The mapping beans, in dispatch order, with their current infos, at most one second stale. */
   List<Entry<T, I>> entries() {
     Cached<T, I> current = cached.get();
     long now = System.nanoTime();

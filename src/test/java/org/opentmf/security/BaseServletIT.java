@@ -89,17 +89,18 @@ abstract class BaseServletIT extends BaseIT {
     }
   }
 
+  /** No handler serves {@code /blacklist}, so the matrix answers 404 before any rule applies. */
   @Order(70)
   @Test
-  void testGetBlacklist_withoutToken_returnsUnauthorized() throws Exception {
-    mockMvc.perform(getBuilder("/blacklist")).andExpect(status().isUnauthorized());
+  void testGetUnmappedBlacklist_withoutToken_returnsNotFound() throws Exception {
+    mockMvc.perform(getBuilder("/blacklist")).andExpect(status().isNotFound());
   }
 
   @Order(80)
   @Test
-  void testGetBlacklist_withReadToken_returnsForbidden() throws Exception {
+  void testGetUnmappedBlacklist_withReadToken_returnsNotFound() throws Exception {
     String token = getToken("read");
-    mockMvc.perform(getBuilder(token, "/blacklist")).andExpect(status().isForbidden());
+    mockMvc.perform(getBuilder(token, "/blacklist")).andExpect(status().isNotFound());
   }
 
   @Order(90)

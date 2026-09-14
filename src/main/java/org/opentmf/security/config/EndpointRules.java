@@ -3,7 +3,6 @@ package org.opentmf.security.config;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.LinkedHashSet;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 import org.opentmf.security.model.Endpoint;
@@ -50,33 +49,42 @@ public final class EndpointRules {
   }
 
   /**
-   * Decides whether a denied request should be answered with the methods the application serves
-   * on its path, and which methods to name. Empty means the denial is none of this feature's
-   * business and belongs to whatever handler would otherwise have answered it.
+   * The HTTP-status matrix, decided for one request from what the application's handler
+   * mappings say about its path — before authentication and before the access rules, which
+   * only ever see a request that lands on {@link MatrixAnswer.Kind#PROCEED}:
+   *
+   * <ol>
+   *   <li>no handler serves the path → {@code 404}, anonymous or authenticated;</li>
+   *   <li>the path is served but the method is not implemented on it — unknown method names
+   *       included → {@code 405}, with no {@code Allow} header;</li>
+   *   <li>a plain {@code OPTIONS} on a served path → {@code 200} with the {@code Allow} Spring's
+   *       own {@code HttpOptionsHandler} would send, unless the application maps
+   *       {@code OPTIONS} itself, in which case it has an answer of its own to give;</li>
+   *   <li>otherwise the request proceeds, and no token or an invalid one answers {@code 401},
+   *       a valid token without the role {@code 403}.</li>
+   * </ol>
    *
    * <p>Stack-neutral on purpose: servlet and reactive must answer the same request the same way,
    * and a copy per stack would let them drift apart one fix at a time.
    *
    * @param requestMethod the method the caller used, never {@code null}
    * @param supported what the application's handler mappings say about the path
-   * @return the methods to advertise, or empty to leave the denial alone
+   * @return the row of the matrix the request lands on
    */
-  public static Optional<Set<HttpMethod>> allowedFor(
-      HttpMethod requestMethod, SupportedMethods supported) {
+  public static MatrixAnswer answerFor(HttpMethod requestMethod, SupportedMethods supported) {
     if (!supported.pathServed()) {
-      return Optional.empty();
+      return MatrixAnswer.notFound();
     }
     Set<HttpMethod> declared = supported.declared();
     if (HttpMethod.OPTIONS.equals(requestMethod)) {
-      // An application that maps OPTIONS itself has an authorization answer to give, not ours.
       return declared.contains(HttpMethod.OPTIONS)
-          ? Optional.empty()
-          : Optional.of(optionsAllow(declared));
+          ? MatrixAnswer.proceed()
+          : MatrixAnswer.options(optionsAllow(declared));
     }
     if (supported.acceptsAnyMethod() || serves(declared, requestMethod)) {
-      return Optional.empty();
+      return MatrixAnswer.proceed();
     }
-    return Optional.of(declared);
+    return MatrixAnswer.methodNotAllowed();
   }
 
   /**
@@ -117,27 +125,14 @@ public final class EndpointRules {
   }
 
   /**
-   * Renders the {@code Allow} value for a {@code 405}, the way Spring renders its own:
-   * {@code HttpRequestMethodNotSupportedException.getHeaders()} joins with {@code ", "}.
-   *
-   * @param methods the methods to advertise, never {@code null}
-   * @return the header value
-   */
-  public static String allowHeader(Set<HttpMethod> methods) {
-    return StringUtils.collectionToDelimitedString(methods, ", ");
-  }
-
-  /**
    * Renders the {@code Allow} value for an {@code OPTIONS} response, the way Spring renders its
    * own: {@code HttpOptionsHandler} goes through {@code HttpHeaders.setAllow}, which joins with
    * a bare {@code ","}.
    *
-   * <p>Yes, the two differ by a space — that is Spring's inconsistency, not ours, and matching
-   * each path's delimiter exactly is the point. The <em>order</em> of the methods is the
-   * library's own canonical one (see {@code SupportedMethods}): Spring's ordering follows its
-   * registry's per-JVM-salted iteration and a mapping's declaration order, neither of which is
-   * reproducible from outside, so the library trades exact byte-parity of the ordering for one
-   * that is deterministic run after run.
+   * <p>The <em>order</em> of the methods is the library's own canonical one (see
+   * {@code SupportedMethods}): Spring's ordering follows its registry's per-JVM-salted iteration
+   * and a mapping's declaration order, neither of which is reproducible from outside, so the
+   * library trades exact byte-parity of the ordering for one that is deterministic run after run.
    *
    * @param methods the methods to advertise, never {@code null}
    * @return the header value

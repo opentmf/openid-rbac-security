@@ -8,16 +8,16 @@ import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
-import org.opentmf.security.model.UnmatchedMethodResponse;
+import org.springframework.beans.factory.BeanFactoryUtils;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnWebApplication.Type;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.annotation.Bean;
 import org.springframework.http.HttpMethod;
-import org.springframework.security.authorization.SingleResultAuthorizationManager;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -28,13 +28,16 @@ import org.springframework.security.config.annotation.web.configurers.ExceptionH
 import org.springframework.security.config.annotation.web.configurers.HttpBasicConfigurer;
 import org.springframework.security.config.annotation.web.configurers.LogoutConfigurer;
 import org.springframework.security.config.annotation.web.configurers.oauth2.server.resource.OAuth2ResourceServerConfigurer;
+import org.springframework.security.oauth2.server.resource.web.authentication.BearerTokenAuthenticationFilter;
 import org.springframework.security.oauth2.server.resource.web.access.BearerTokenAccessDeniedHandler;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
-import org.springframework.security.web.access.intercept.RequestAuthorizationContext;
+import org.springframework.security.web.firewall.HttpFirewall;
+import org.springframework.security.web.firewall.StrictHttpFirewall;
 import org.springframework.util.CollectionUtils;
-import org.springframework.web.servlet.mvc.method.RequestMappingInfoHandlerMapping;
+import org.springframework.web.servlet.HandlerExceptionResolver;
+import org.springframework.web.servlet.HandlerMapping;
 
 /**
  * OpenTMF Web Security configures according to the supplied OpenTmfSecurityProperties.
@@ -63,11 +66,28 @@ public class ServletSecurityAutoConfiguration {
     return warmer;
   }
 
+  /**
+   * Lets every HTTP method name into the chain, so that an unknown one ({@code PROPFIND},
+   * {@code BREW}) reaches the status matrix and is answered {@code 404} or {@code 405} like any
+   * other method, instead of being rejected as {@code 400} by the firewall before any filter
+   * runs. Everything else the strict firewall guards — path traversal, encoded separators,
+   * malformed headers — is left exactly as it is. A consumer's own {@link HttpFirewall} bean
+   * takes precedence, and then unknown method names keep whatever answer that firewall gives.
+   */
+  @Bean
+  @ConditionalOnMissingBean(HttpFirewall.class)
+  HttpFirewall anyMethodNameHttpFirewall() {
+    var firewall = new StrictHttpFirewall();
+    firewall.setUnsafeAllowAnyHttpMethod(true);
+    return firewall;
+  }
+
   @Bean
   SecurityFilterChain servletSecurityFilterChain(HttpSecurity http) {
     var entryPoint = resolveUnique(authenticationEntryPoints, AuthenticationEntryPoint.class);
     var accessDeniedHandler = resolveUnique(accessDeniedHandlers, AccessDeniedHandler.class);
-    var deniedHandlers = new DeniedHandlers(accessDeniedHandler);
+    var resolver = new ServletSupportedMethodsResolver(this::handlerMappings);
+    warmer.register(resolver::warmUp);
     return http
         .sessionManagement(session -> session.sessionCreationPolicy(STATELESS))
         .csrf(CsrfConfigurer::disable)
@@ -76,73 +96,61 @@ public class ServletSecurityAutoConfiguration {
         .logout(LogoutConfigurer::disable)
         .headers(withDefaults())
         .cors(withDefaults())
+        // Before authentication: an unknown path is 404 and an unimplemented method 405 for
+        // every caller, token or no token, valid or not — the access rules see the rest.
+        .addFilterBefore(
+            new ServletHttpStatusMatrixFilter(resolver, this::exceptionResolvers),
+            BearerTokenAuthenticationFilter.class)
         .authorizeHttpRequests(this::applyOpenTmfSecurityDefinitions)
         .exceptionHandling(handling ->
-            configureExceptionHandling(handling, entryPoint, deniedHandlers))
+            configureExceptionHandling(handling, entryPoint, accessDeniedHandler, resolver))
         .oauth2ResourceServer(oauth2 -> configureResourceServer(oauth2, entryPoint))
         .build();
   }
 
   /**
-   * The denied-request handler for one chain, decided once and installed on the
-   * {@code exceptionHandling} slot, which covers every authorization denial regardless of how
-   * the caller authenticated. Decorating only the resource server's bearer-token slot would
-   * leave a denial of an authenticated-but-non-bearer caller — an application adding its own
-   * pre-authentication mechanism beside this library — on the undecorated default, so the
-   * documented 405 behavior would silently depend on how the request authenticated.
-   *
-   * <p>Without a consumer-supplied handler the delegate is the same
-   * {@link BearerTokenAccessDeniedHandler} Spring's resource server would have installed for
-   * bearer callers, so their denials answer exactly as before; the change is that every other
-   * authenticated denial now goes through the same handler instead of the framework's default
-   * error page.
+   * The handler mappings this context's {@code DispatcherServlet} dispatches with — which, for
+   * the main context, includes a parent context's, exactly as the dispatcher's own detection
+   * does.
    */
-  private final class DeniedHandlers {
-
-    private final AccessDeniedHandler global;
-
-    private DeniedHandlers(AccessDeniedHandler consumerHandler) {
-      boolean methodAware = openTmfSecurityProperties.getUnmatchedMethodResponse()
-          == UnmatchedMethodResponse.METHOD_NOT_ALLOWED;
-      if (!methodAware) {
-        this.global = consumerHandler;
-        return;
-      }
-      AccessDeniedHandler delegate = (consumerHandler != null)
-          ? consumerHandler
-          : new BearerTokenAccessDeniedHandler();
-      var resolver =
-          new ServletSupportedMethodsResolver(ServletSecurityAutoConfiguration.this::mappings);
-      warmer.register(resolver::warmUp);
-      this.global = new MethodNotAllowedAccessDeniedHandler(delegate, resolver);
-    }
+  private Stream<HandlerMapping> handlerMappings() {
+    return BeanFactoryUtils.beansOfTypeIncludingAncestors(applicationContext, HandlerMapping.class)
+        .values()
+        .stream();
   }
 
-  /**
-   * The handler mappings of this context and no other. A lookup that reached into a parent
-   * context would let this chain answer for routes it does not serve.
-   */
-  private Stream<RequestMappingInfoHandlerMapping> mappings() {
-    return applicationContext.getBeansOfType(RequestMappingInfoHandlerMapping.class)
+  /** The exception resolvers the same dispatcher renders through; detected the same way. */
+  private Stream<HandlerExceptionResolver> exceptionResolvers() {
+    return BeanFactoryUtils
+        .beansOfTypeIncludingAncestors(applicationContext, HandlerExceptionResolver.class)
         .values()
         .stream();
   }
 
   /**
-   * Applies the consumer-supplied handlers on the {@code ExceptionTranslationFilter} path: an
-   * anonymous request hitting a protected URL (401) and authorization denials for authenticated
-   * users (403). Leaving a handler unset keeps that path on the Spring Security default.
+   * Applies the handlers on the {@code ExceptionTranslationFilter} path: an anonymous request
+   * hitting a protected URL (401) and authorization denials for authenticated users (403).
+   * Leaving the entry point unset keeps that path on the Spring Security default. The denied
+   * handler is always set, on this slot, which covers every authorization denial regardless of
+   * how the caller authenticated: without a consumer-supplied handler it is the same
+   * {@link BearerTokenAccessDeniedHandler} Spring's resource server would have installed for
+   * bearer callers, so their denials answer exactly as before, and an authenticated-but-non-bearer
+   * caller — an application adding its own pre-authentication beside this library — gets the
+   * same RFC 6750 shape rather than the framework's default error page. Either handler is
+   * decorated so that an authenticated plain {@code OPTIONS} gets Spring's own answer — see
+   * {@link OptionsAccessDeniedHandler}.
    */
-  private void configureExceptionHandling(
+  private static void configureExceptionHandling(
       ExceptionHandlingConfigurer<HttpSecurity> handling,
       AuthenticationEntryPoint entryPoint,
-      DeniedHandlers deniedHandlers) {
+      AccessDeniedHandler consumerHandler,
+      ServletSupportedMethodsResolver resolver) {
     if (entryPoint != null) {
       handling.authenticationEntryPoint(entryPoint);
     }
-    if (deniedHandlers.global != null) {
-      handling.accessDeniedHandler(deniedHandlers.global);
-    }
+    AccessDeniedHandler delegate =
+        consumerHandler != null ? consumerHandler : new BearerTokenAccessDeniedHandler();
+    handling.accessDeniedHandler(new OptionsAccessDeniedHandler(delegate, resolver));
   }
 
   private void applyOpenTmfSecurityDefinitions(
@@ -175,14 +183,8 @@ public class ServletSecurityAutoConfiguration {
   private void configureBlacklist(
       AuthorizeHttpRequestsConfigurer<HttpSecurity>.AuthorizationManagerRequestMatcherRegistry requests) {
     if (!CollectionUtils.isEmpty(openTmfSecurityProperties.getBlacklist())) {
-      // Spring's own constant-result manager, denying with the recognisable BlacklistDecision,
-      // which AuthorizationFilter carries to the denied-request handler inside the thrown
-      // exception. See BlacklistDecision for why the type matters.
-      var blacklistDenial =
-          new SingleResultAuthorizationManager<RequestAuthorizationContext>(
-              BlacklistDecision.INSTANCE);
-      openTmfSecurityProperties.getBlacklist().forEach(blackListedEndpoint ->
-          requests.requestMatchers(blackListedEndpoint).access(blacklistDenial));
+      openTmfSecurityProperties.getBlacklist()
+          .forEach(blackListedEndpoint -> requests.requestMatchers(blackListedEndpoint).denyAll());
     }
   }
 
@@ -210,7 +212,8 @@ public class ServletSecurityAutoConfiguration {
    * on the bearer-token path: invalid / expired / malformed tokens (401), which the
    * {@code BearerTokenAuthenticationFilter} handles before the {@code ExceptionTranslationFilter}
    * ever sees them. Denials are not configured here: the denied-request handler lives on the
-   * {@code exceptionHandling} slot, which covers this path too — see {@link DeniedHandlers}.
+   * {@code exceptionHandling} slot, which covers this path too — see
+   * {@link #configureExceptionHandling}.
    */
   private void configureResourceServer(
       OAuth2ResourceServerConfigurer<HttpSecurity> oauth2, AuthenticationEntryPoint entryPoint) {
