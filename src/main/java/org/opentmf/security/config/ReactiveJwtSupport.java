@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.opentmf.security.jwks.TrustedIssuerKeys;
 import org.opentmf.security.jwt.CompositeReactiveJwtDecoder;
 import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ReactiveJwtPrincipalConverter;
@@ -43,19 +44,21 @@ public class ReactiveJwtSupport {
   @Getter
   private final ReactiveJwtDecoder decoder;
 
-  public ReactiveJwtSupport(OpenTmfSecurityProperties properties) {
+  public ReactiveJwtSupport(OpenTmfSecurityProperties properties, TrustedIssuerKeys keys) {
     List<ResolvedIssuer> issuers = resolveIssuers(properties);
     if (issuers.size() == 1 && !issuers.get(0).pinsIssuer()) {
       ResolvedIssuer single = issuers.get(0);
-      this.decoder = JwtDecoderFactory.reactiveDecoder(single);
+      this.decoder = JwtDecoderFactory.reactiveDecoder(single, keys.forIssuer(0, single));
       this.authenticationConverter = converterFor(single);
       this.authenticationManagerResolver = null;
       return;
     }
     Map<String, ReactiveJwtDecoder> decoders = new LinkedHashMap<>();
     Map<String, ReactiveAuthenticationManager> managers = new LinkedHashMap<>();
-    for (ResolvedIssuer issuer : issuers) {
-      ReactiveJwtDecoder issuerDecoder = JwtDecoderFactory.reactiveDecoder(issuer);
+    for (int i = 0; i < issuers.size(); i++) {
+      ResolvedIssuer issuer = issuers.get(i);
+      ReactiveJwtDecoder issuerDecoder =
+          JwtDecoderFactory.reactiveDecoder(issuer, keys.forIssuer(i, issuer));
       decoders.put(issuer.issuer(), issuerDecoder);
       managers.put(issuer.issuer(), authenticationManager(issuer, issuerDecoder));
       log.info("Trusting JWT issuer '{}' ({}), roles from claim '{}', principal from claim '{}',"

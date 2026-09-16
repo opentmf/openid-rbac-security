@@ -9,6 +9,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.security.config.management.ReactiveManagementSecurityAutoConfiguration;
+import org.opentmf.security.jwks.IssuerKeys;
+import org.opentmf.security.jwks.JwkSetWarmer;
+import org.opentmf.security.jwks.KeyOutageAwareJwtDecoder;
+import org.opentmf.security.jwks.KeyOutageAwareReactiveJwtDecoder;
+import org.opentmf.security.jwks.ReactiveKeyOutageFilter;
+import org.opentmf.security.jwks.ServletKeyOutageFilter;
+import org.opentmf.security.jwks.TrustedIssuerKeys;
 import org.opentmf.security.config.management.ServletManagementSecurityAutoConfiguration;
 import org.springframework.boot.autoconfigure.AutoConfigurations;
 import org.springframework.boot.test.context.FilteredClassLoader;
@@ -43,6 +50,7 @@ class StackIsolationTest {
         .withClassLoader(new FilteredClassLoader("org.springframework.web.reactive"))
         .withConfiguration(AutoConfigurations.of(
             WebMvcAutoConfiguration.class,
+            JwksAutoConfiguration.class,
             ServletJwtAutoConfiguration.class,
             ServletSecurityAutoConfiguration.class,
             ReactiveJwtAutoConfiguration.class,
@@ -63,6 +71,7 @@ class StackIsolationTest {
         .withClassLoader(new FilteredClassLoader("org.springframework.web.servlet"))
         .withConfiguration(AutoConfigurations.of(
             WebFluxAutoConfiguration.class,
+            JwksAutoConfiguration.class,
             ReactiveJwtAutoConfiguration.class,
             ReactiveSecurityAutoConfiguration.class,
             ServletJwtAutoConfiguration.class,
@@ -87,6 +96,7 @@ class StackIsolationTest {
             "org.springframework.web.servlet", "jakarta.servlet"))
         .withConfiguration(AutoConfigurations.of(
             WebFluxAutoConfiguration.class,
+            JwksAutoConfiguration.class,
             ReactiveJwtAutoConfiguration.class,
             ReactiveSecurityAutoConfiguration.class,
             ServletJwtAutoConfiguration.class,
@@ -119,7 +129,14 @@ class StackIsolationTest {
       ServletManagementSecurityAutoConfiguration.class,
       ServletSupportedMethodsResolver.class,
       ServletHttpStatusMatrixFilter.class,
-      OptionsAccessDeniedHandler.class})
+      ServletErrorRenderer.class,
+      ServletKeyOutageFilter.class,
+      KeyOutageAwareJwtDecoder.class,
+      OptionsAccessDeniedHandler.class,
+      JwksAutoConfiguration.class,
+      TrustedIssuerKeys.class,
+      IssuerKeys.class,
+      JwkSetWarmer.class})
   void servletClasses_nameNoWebFluxType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/reactive")
@@ -133,7 +150,13 @@ class StackIsolationTest {
       ReactiveManagementSecurityAutoConfiguration.class,
       ReactiveSupportedMethodsResolver.class,
       ReactiveHttpStatusMatrixFilter.class,
-      OptionsServerAccessDeniedHandler.class})
+      ReactiveKeyOutageFilter.class,
+      KeyOutageAwareReactiveJwtDecoder.class,
+      OptionsServerAccessDeniedHandler.class,
+      JwksAutoConfiguration.class,
+      TrustedIssuerKeys.class,
+      IssuerKeys.class,
+      JwkSetWarmer.class})
   void reactiveClasses_nameNoSpringMvcOrServletType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/servlet")

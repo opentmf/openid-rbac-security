@@ -57,7 +57,7 @@ public record SupportedMethods(Set<HttpMethod> declared, boolean acceptsAnyMetho
    * matches the path either names methods, which land in {@link #declared()}, or names none,
    * which sets {@link #acceptsAnyMethod()}. Carrying it separately would admit states no
    * producer can mean — "methods declared, but the path is not served" — that the decision in
-   * {@link EndpointRules#allowedFor} would silently read as "leave the denial alone".
+   * {@link EndpointRules#answerFor} would silently read as "leave the denial alone".
    *
    * @return {@code true} when the application serves this path
    */
