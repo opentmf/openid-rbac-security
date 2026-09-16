@@ -2,6 +2,7 @@ package org.opentmf.security.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponseWrapper;
 import java.util.List;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -50,12 +51,14 @@ public class ServletErrorRenderer {
    * Renders the exception, or the bare status when the application does not.
    *
    * <p>The exception's own headers ({@code Retry-After} on a signing-key outage) are written to
-   * the response <em>before</em> the resolvers run: an exception mapper that rebuilds the answer
-   * as {@code ResponseEntity.status(body.getStatus()).body(body)} — the shape every DNMS service
-   * inherited from the template — carries no headers of its own, and a {@code ResponseEntity}
-   * adds its headers to the response without resetting the ones already there. They are set once
-   * more after rendering, uncommitted, so that a resolver which copies them itself (Spring's
-   * default one does, with {@code addHeader}) leaves one value, not two.
+   * the response <em>before</em> the resolvers run, once: an exception mapper that rebuilds the
+   * answer as {@code ResponseEntity.status(body.getStatus()).body(body)} — the shape every DNMS
+   * service inherited from the template — carries no headers of its own, and a
+   * {@code ResponseEntity} adds its headers to the response without resetting the ones already
+   * there. A resolver that copies the exception's headers itself (Spring's default one, with
+   * {@code addHeader}, before it {@code sendError}s — after which Tomcat's facade reports the
+   * response committed and nothing can be collapsed) sees a response on which adding a value the
+   * header already carries is a no-op, so the wire carries each value exactly once.
    *
    * @param request the request
    * @param response the response to render into
@@ -67,35 +70,60 @@ public class ServletErrorRenderer {
       HttpServletRequest request, HttpServletResponse response, HttpStatus status,
       HttpHeaders headers, Exception ex) {
     if (!response.isCommitted()) {
-      setHeaders(response, headers);
+      headers.forEach((name, values) -> {
+        response.setHeader(name, values.isEmpty() ? "" : values.get(0));
+        for (int i = 1; i < values.size(); i++) {
+          response.addHeader(name, values.get(i));
+        }
+      });
     }
     boolean rendered;
     try {
-      rendered = renderedByTheApplication(request, response, ex);
+      rendered = renderedByTheApplication(request, new WriteOnceHeaders(response, headers), ex);
     } catch (RuntimeException | LinkageError rendering) {
       log.debug("The exception resolvers failed; answering {} bare.", status.value(), rendering);
       rendered = false;
     }
-    if (response.isCommitted()) {
-      return;
-    }
-    if (!rendered) {
+    if (!rendered && !response.isCommitted()) {
       response.resetBuffer();
       response.setStatus(status.value());
       response.setContentLength(0);
     }
-    setHeaders(response, headers);
   }
 
-  private static void setHeaders(HttpServletResponse response, HttpHeaders headers) {
-    headers.forEach((name, values) -> {
-      if (!values.isEmpty()) {
-        response.setHeader(name, values.get(0));
-        for (int i = 1; i < values.size(); i++) {
-          response.addHeader(name, values.get(i));
-        }
+  /**
+   * The response as the resolvers see it: adding a value that one of the exception's headers
+   * already carries is a no-op, so a resolver that copies those headers itself does not double
+   * them. Everything else goes straight through.
+   */
+  private static final class WriteOnceHeaders extends HttpServletResponseWrapper {
+
+    private final HttpHeaders exceptionHeaders;
+
+    private WriteOnceHeaders(HttpServletResponse response, HttpHeaders exceptionHeaders) {
+      super(response);
+      this.exceptionHeaders = exceptionHeaders;
+    }
+
+    @Override
+    public void addHeader(String name, String value) {
+      if (alreadyCarries(name, value)) {
+        return;
       }
-    });
+      super.addHeader(name, value);
+    }
+
+    @Override
+    public void setHeader(String name, String value) {
+      if (alreadyCarries(name, value) && getHeaders(name).size() == 1) {
+        return;
+      }
+      super.setHeader(name, value);
+    }
+
+    private boolean alreadyCarries(String name, String value) {
+      return exceptionHeaders.containsHeader(name) && getHeaders(name).contains(value);
+    }
   }
 
   private boolean renderedByTheApplication(

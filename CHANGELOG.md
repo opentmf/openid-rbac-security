@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.2] - 2026-09-16
+
+### Fixed
+- **The typed `503` shipped `Retry-After` twice (`30, 30`) in 3.2.1 when nothing in the application handled `ErrorResponseException`** — a package-scoped advice, say — and the exception fell to Spring's default resolver, which copies the exception's headers itself with `addHeader` and then `sendError`s; after `sendError` the container's response reports itself committed, so the 3.2.1 collapse-after-rendering never ran. The resolvers now see a response on which re-adding a value one of the exception's headers already carries is a no-op, so the wire carries each value exactly once whoever renders — a mapper that rebuilds the response without headers (one value, as in 3.2.1), Spring's default resolver (one value, fixed here), the bare fallback, and a resolver that sets its own different value (kept). Servlet only; not part of the DNMS re-alignment train — consumers stay on 3.2.1 / BOM 2.1.28 unless they hit this shape.
+
 ## [3.2.1] - 2026-09-16
 
 ### Fixed

@@ -47,12 +47,13 @@ class ServletErrorRendererTest {
   }
 
   /**
-   * Spring's default resolver copies the headers itself and then {@code sendError}s. The mock
-   * response commits on {@code sendError} (Tomcat does not, and the renderer then collapses the
-   * value to one), so here the header may carry the value twice — never a different value.
+   * Spring's default resolver copies the headers itself ({@code addHeader}) and then
+   * {@code sendError}s — after which the response reports itself committed, on Tomcat's facade
+   * as on the mock, so nothing could collapse a duplicate afterwards. The value must be there
+   * exactly once regardless. (Shipped doubled in 3.2.1.)
    */
   @Test
-  void springsDefaultResolver_whichCopiesTheHeadersItself_neverChangesTheValue() {
+  void springsDefaultResolver_whichCopiesTheHeadersItself_leavesExactlyOneValue() {
     MockHttpServletResponse response = new MockHttpServletResponse();
 
     new ServletErrorRenderer(() -> Stream.of(new DefaultHandlerExceptionResolver()))
@@ -60,7 +61,26 @@ class ServletErrorRendererTest {
             OUTAGE.getHeaders(), OUTAGE);
 
     assertThat(response.getStatus()).isEqualTo(503);
-    assertThat(response.getHeaders(HttpHeaders.RETRY_AFTER)).isNotEmpty().containsOnly("30");
+    assertThat(response.isCommitted()).isTrue();
+    assertThat(response.getHeaders(HttpHeaders.RETRY_AFTER)).containsExactly("30");
+  }
+
+  /** A resolver that sets its own, different value for the header keeps it: no override. */
+  @Test
+  void aResolverThatSetsADifferentValue_isNotOverridden() {
+    HandlerExceptionResolver opinionated = (request, response, handler, ex) -> {
+      response.setStatus(503);
+      response.setHeader(HttpHeaders.RETRY_AFTER, "120");
+      write(response, "{}");
+      return new ModelAndView();
+    };
+    MockHttpServletResponse response = new MockHttpServletResponse();
+
+    new ServletErrorRenderer(() -> Stream.of(opinionated))
+        .render(new MockHttpServletRequest(), response, HttpStatus.SERVICE_UNAVAILABLE,
+            OUTAGE.getHeaders(), OUTAGE);
+
+    assertThat(response.getHeaders(HttpHeaders.RETRY_AFTER)).containsExactly("120");
   }
 
   @Test

@@ -9,6 +9,7 @@ import static org.mockito.Mockito.when;
 
 import jakarta.servlet.ServletRegistration;
 import jakarta.servlet.http.HttpServlet;
+import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Optional;
@@ -177,7 +178,8 @@ class ServletHttpStatusMatrixFilterTest {
   private void rendersWithBody(String body) {
     when(applicationResolver.resolveException(any(), any(), any(), any()))
         .thenAnswer(invocation -> {
-      MockHttpServletResponse target = invocation.getArgument(1);
+      // The resolvers see the response through the renderer's wrapper, as any resolver would.
+      HttpServletResponse target = invocation.getArgument(1);
       Exception ex = invocation.getArgument(3);
       target.setStatus(ex instanceof NoHandlerFoundException ? 404 : 405);
       try {
