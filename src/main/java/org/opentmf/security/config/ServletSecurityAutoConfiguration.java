@@ -6,6 +6,7 @@ import static org.springframework.security.config.http.SessionCreationPolicy.STA
 
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.jwks.ServletKeyOutageFilter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
 import org.springframework.beans.factory.BeanFactoryUtils;
@@ -100,6 +101,10 @@ public class ServletSecurityAutoConfiguration {
         // every caller, token or no token, valid or not — the access rules see the rest.
         .addFilterBefore(
             new ServletHttpStatusMatrixFilter(resolver, this::exceptionResolvers),
+            BearerTokenAuthenticationFilter.class)
+        // Around the bearer filter: an issuer whose keys are unavailable answers the typed 503.
+        .addFilterBefore(
+            new ServletKeyOutageFilter(new ServletErrorRenderer(this::exceptionResolvers)),
             BearerTokenAuthenticationFilter.class)
         .authorizeHttpRequests(this::applyOpenTmfSecurityDefinitions)
         .exceptionHandling(handling ->

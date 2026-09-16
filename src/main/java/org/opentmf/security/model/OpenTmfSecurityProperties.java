@@ -142,6 +142,13 @@ public class OpenTmfSecurityProperties {
   private @Valid Management management = new Management();
 
   /**
+   * How every trusted issuer's signing keys are fetched and cached: cache-first, refreshed in
+   * the background, served stale during an outage, with a startup warm-up. Defaults reproduce
+   * the pre-3.2.0 fetch wherever it succeeded; see {@link JwksProperties}.
+   */
+  private @Valid JwksProperties jwks = new JwksProperties();
+
+  /**
    * Guards the two mutually exclusive ways of declaring trust. Neither configured means the
    * service would accept no token at all; both configured is ambiguous about which issuer
    * governs. Either way the deployer must choose, so boot fails rather than guessing.

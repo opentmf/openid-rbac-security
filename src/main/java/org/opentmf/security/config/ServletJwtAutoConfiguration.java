@@ -1,6 +1,7 @@
 package org.opentmf.security.config;
 
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.jwks.TrustedIssuerKeys;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -14,7 +15,7 @@ import org.springframework.security.oauth2.jwt.JwtDecoder;
  *
  * @author Gokhan Demir
  */
-@AutoConfiguration
+@AutoConfiguration(after = JwksAutoConfiguration.class)
 @EnableConfigurationProperties(OpenTmfSecurityProperties.class)
 @RequiredArgsConstructor
 public class ServletJwtAutoConfiguration {
@@ -23,8 +24,8 @@ public class ServletJwtAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  ServletJwtSupport servletJwtSupport() {
-    return new ServletJwtSupport(openTmfSecurityProperties);
+  ServletJwtSupport servletJwtSupport(TrustedIssuerKeys trustedIssuerKeys) {
+    return new ServletJwtSupport(openTmfSecurityProperties, trustedIssuerKeys);
   }
 
   /**

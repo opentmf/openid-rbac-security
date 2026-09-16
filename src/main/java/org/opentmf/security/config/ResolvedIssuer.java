@@ -16,6 +16,8 @@ import org.springframework.core.io.Resource;
  * @param fallbackUserClaims claims tried when {@code userClaim} is absent, never {@code null}
  * @param authoritiesClaim roles claim, already defaulted to {@code roles}
  * @param audiences accepted {@code aud} values; empty means the audience is not validated
+ * @param proxy the {@code host:port} proxy the JWK set is fetched through, or {@code null} to
+ *     honour the JVM's proxy properties and the process environment
  * @author Gokhan Demir
  */
 public record ResolvedIssuer(
@@ -25,7 +27,8 @@ public record ResolvedIssuer(
     String userClaim,
     List<String> fallbackUserClaims,
     String authoritiesClaim,
-    List<String> audiences) {
+    List<String> audiences,
+    String proxy) {
 
   /**
    * Whether this entry pins the {@code iss} claim. False only in single-issuer mode.

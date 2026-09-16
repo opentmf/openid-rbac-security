@@ -5,6 +5,7 @@ import static org.springframework.security.config.Customizer.withDefaults;
 
 import java.util.stream.Stream;
 import lombok.RequiredArgsConstructor;
+import org.opentmf.security.jwks.ReactiveKeyOutageFilter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OtherEndpoints;
 import org.springframework.beans.factory.BeanFactoryUtils;
@@ -100,6 +101,8 @@ public class ReactiveSecurityAutoConfiguration {
         // every caller, token or no token, valid or not — the access rules see the rest.
         .addFilterBefore(
             new ReactiveHttpStatusMatrixFilter(resolver), SecurityWebFiltersOrder.AUTHENTICATION)
+        // Around the bearer filter: an issuer whose keys are unavailable answers the typed 503.
+        .addFilterBefore(new ReactiveKeyOutageFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
         .authorizeExchange(applyOpenTmfSecurityDefinitions())
         .exceptionHandling(handling ->
             configureExceptionHandling(handling, entryPoint, accessDeniedHandler, resolver))

@@ -48,6 +48,7 @@ class RetiredPropertyGuardTest {
         .withConfiguration(AutoConfigurations.of(
             AccessRuleBindingAutoConfiguration.class,
             WebMvcAutoConfiguration.class,
+            JwksAutoConfiguration.class,
             ServletJwtAutoConfiguration.class,
             ServletSecurityAutoConfiguration.class))
         .withPropertyValues(

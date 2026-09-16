@@ -87,6 +87,16 @@ public final class TestIssuer {
     }
   }
 
+  /** The public JWK set, as an identity provider's JWKS endpoint would serve it. */
+  public String jwkSetJson() {
+    return new JWKSet(signingKey.toPublicJWK()).toString();
+  }
+
+  /** The key id this issuer signs with. */
+  public String keyId() {
+    return signingKey.getKeyID();
+  }
+
   /**
    * Mints a token that is valid for an hour, carrying this issuer's {@code iss} and a
    * {@code sub}. The customizer adds the claims under test — roles, audience, a different

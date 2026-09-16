@@ -1,25 +1,20 @@
 package org.opentmf.security.config;
 
-import com.nimbusds.jose.JWSAlgorithm;
+import com.nimbusds.jose.jwk.JWKMatcher;
+import com.nimbusds.jose.jwk.JWKSelector;
+import com.nimbusds.jose.KeySourceException;
 import com.nimbusds.jose.jwk.JWK;
-import com.nimbusds.jose.jwk.source.JWKSource;
-import com.nimbusds.jose.jwk.source.JWKSourceBuilder;
-import com.nimbusds.jose.proc.JWSKeySelector;
-import com.nimbusds.jose.proc.JWSVerificationKeySelector;
-import com.nimbusds.jose.proc.SecurityContext;
 import com.nimbusds.jwt.SignedJWT;
-import java.io.IOException;
-import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Predicate;
 import lombok.AccessLevel;
 import lombok.NoArgsConstructor;
-import org.opentmf.security.util.ReactiveResourceRetriever;
-import org.opentmf.security.util.ServletResourceRetriever;
+import org.opentmf.security.jwks.IssuerKeys;
+import org.opentmf.security.jwks.KeyOutageAwareJwtDecoder;
+import org.opentmf.security.jwks.KeyOutageAwareReactiveJwtDecoder;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.security.oauth2.jwt.JwtClaimNames;
@@ -30,12 +25,13 @@ import org.springframework.security.oauth2.jwt.JwtValidators;
 import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
 import org.springframework.security.oauth2.jwt.NimbusReactiveJwtDecoder;
 import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
-import org.springframework.util.ResourceUtils;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 /**
- * Builds one stack's {@link JwtDecoder} for a {@link ResolvedIssuer}, keeping the classpath /
- * file JWKS support that the remote-URL decoders do not provide.
+ * Builds one stack's decoder for a {@link ResolvedIssuer} over the issuer's cache-first
+ * {@link IssuerKeys}, decorated so that a key-availability failure is answered as such.
  *
  * <p>Validators follow the entry: an issuer-pinning validator and — when the entry declares
  * audiences — an {@code aud} validator are layered on top of Spring Security's defaults. An
@@ -47,53 +43,29 @@ import reactor.core.publisher.Flux;
 @NoArgsConstructor(access = AccessLevel.PRIVATE)
 final class JwtDecoderFactory {
 
-  static JwtDecoder servletDecoder(ResolvedIssuer issuer) {
-    NimbusJwtDecoder decoder = buildServletDecoder(issuer);
-    additionalValidators(issuer).ifPresent(
-        validators -> decoder.setJwtValidator(JwtValidators.createDefaultWithValidators(validators)));
-    return decoder;
+  static JwtDecoder servletDecoder(ResolvedIssuer issuer, IssuerKeys keys) {
+    NimbusJwtDecoder decoder = NimbusJwtDecoder.withJwkSource(keys.source()).build();
+    additionalValidators(issuer).ifPresent(validators ->
+        decoder.setJwtValidator(JwtValidators.createDefaultWithValidators(validators)));
+    return new KeyOutageAwareJwtDecoder(decoder, keys);
   }
 
-  static ReactiveJwtDecoder reactiveDecoder(ResolvedIssuer issuer) {
-    NimbusReactiveJwtDecoder decoder = buildReactiveDecoder(issuer);
-    additionalValidators(issuer).ifPresent(
-        validators -> decoder.setJwtValidator(JwtValidators.createDefaultWithValidators(validators)));
-    return decoder;
-  }
-
-  private static NimbusJwtDecoder buildServletDecoder(ResolvedIssuer issuer) {
-    URL url = jwkSetUrl(issuer);
-    if (!ResourceUtils.isFileURL(url)) {
-      return NimbusJwtDecoder.withJwkSetUri(url.toString()).build();
-    }
-    JWKSource<SecurityContext> source = JWKSourceBuilder
-        .create(url, new ServletResourceRetriever())
+  static ReactiveJwtDecoder reactiveDecoder(ResolvedIssuer issuer, IssuerKeys keys) {
+    // The blocking key lookup — a cached read after the first load, a fetch before it — runs
+    // off the event loop; a checked KeySourceException travels as the error signal unchanged.
+    NimbusReactiveJwtDecoder decoder = NimbusReactiveJwtDecoder
+        .withJwkSource(jwt -> Mono.fromCallable(() -> select(jwt, keys))
+            .subscribeOn(Schedulers.boundedElastic())
+            .flatMapMany(Flux::fromIterable))
         .build();
-    JWSKeySelector<SecurityContext> selector =
-        new JWSVerificationKeySelector<>(JWSAlgorithm.RS256, source);
-    return NimbusJwtDecoder
-        .withJwkSetUri(url.toString())
-        .jwtProcessorCustomizer(jwtProcessor -> jwtProcessor.setJWSKeySelector(selector))
-        .build();
+    additionalValidators(issuer).ifPresent(validators ->
+        decoder.setJwtValidator(JwtValidators.createDefaultWithValidators(validators)));
+    return new KeyOutageAwareReactiveJwtDecoder(decoder, keys);
   }
 
-  private static NimbusReactiveJwtDecoder buildReactiveDecoder(ResolvedIssuer issuer) {
-    URL url = jwkSetUrl(issuer);
-    if (!ResourceUtils.isFileURL(url)) {
-      return new NimbusReactiveJwtDecoder(url.toString());
-    }
-    ReactiveResourceRetriever retriever = new ReactiveResourceRetriever(issuer.jwkSetUri());
-    Function<SignedJWT, Flux<JWK>> jwkSource = signedJwt -> retriever.getKeys();
-    return NimbusReactiveJwtDecoder.withJwkSource(jwkSource).build();
-  }
-
-  private static URL jwkSetUrl(ResolvedIssuer issuer) {
-    try {
-      return issuer.jwkSetUri().getURL();
-    } catch (IOException e) {
-      throw new IllegalArgumentException(
-          "Exception during jwtDecoder configuration for issuer " + issuer.name(), e);
-    }
+  private static List<JWK> select(SignedJWT jwt, IssuerKeys keys)
+      throws KeySourceException {
+    return keys.source().get(new JWKSelector(JWKMatcher.forJWSHeader(jwt.getHeader())), null);
   }
 
   /**

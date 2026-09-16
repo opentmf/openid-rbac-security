@@ -9,6 +9,7 @@ import org.opentmf.security.config.ReactiveHttpStatusMatrixFilter;
 import org.opentmf.security.config.ReactiveJwtSupport;
 import org.opentmf.security.config.ReactiveSupportedMethodsResolver;
 import org.opentmf.security.config.SupportedMethodsWarmer;
+import org.opentmf.security.jwks.ReactiveKeyOutageFilter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
@@ -83,6 +84,7 @@ public class ReactiveManagementSecurityAutoConfiguration {
         // The same HTTP-status matrix as the main port, answered from this context's mappings.
         .addFilterBefore(
             new ReactiveHttpStatusMatrixFilter(resolver), SecurityWebFiltersOrder.AUTHENTICATION)
+        .addFilterBefore(new ReactiveKeyOutageFilter(), SecurityWebFiltersOrder.AUTHENTICATION)
         .authorizeExchange(this::applyManagementAuthorization)
         .exceptionHandling(handling -> configureDeniedHandler(handling, resolver))
         .oauth2ResourceServer(this::configureResourceServer)

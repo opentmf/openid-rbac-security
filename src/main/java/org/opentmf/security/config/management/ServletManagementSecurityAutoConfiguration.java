@@ -9,11 +9,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.config.EndpointRules;
 import org.opentmf.security.config.OptionsAccessDeniedHandler;
+import org.opentmf.security.config.ServletErrorRenderer;
 import org.opentmf.security.config.ServletHttpStatusMatrixFilter;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletJwtSupport;
 import org.opentmf.security.config.ServletSupportedMethodsResolver;
 import org.opentmf.security.config.SupportedMethodsWarmer;
+import org.opentmf.security.jwks.ServletKeyOutageFilter;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.opentmf.security.model.OpenTmfSecurityProperties.Management;
 import org.opentmf.security.model.OtherEndpoints;
@@ -111,6 +113,10 @@ public class ServletManagementSecurityAutoConfiguration {
         // The same HTTP-status matrix as the main port, answered from the management context.
         .addFilterBefore(
             new ServletHttpStatusMatrixFilter(resolver, this::managementExceptionResolvers),
+            BearerTokenAuthenticationFilter.class)
+        .addFilterBefore(
+            new ServletKeyOutageFilter(
+                new ServletErrorRenderer(this::managementExceptionResolvers)),
             BearerTokenAuthenticationFilter.class)
         .authorizeHttpRequests(this::applyManagementAuthorization)
         .exceptionHandling(handling -> configureDeniedHandler(handling, resolver))

@@ -10,6 +10,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.security.config.AccessRuleBindingAutoConfiguration;
+import org.opentmf.security.config.JwksAutoConfiguration;
 import org.opentmf.security.config.EndpointMethodCaseGuard;
 import org.opentmf.security.config.ServletJwtAutoConfiguration;
 import org.opentmf.security.config.ServletSecurityAutoConfiguration;
@@ -121,6 +122,7 @@ class EndpointMethodBindingTest {
         .withConfiguration(AutoConfigurations.of(
             AccessRuleBindingAutoConfiguration.class,
             WebMvcAutoConfiguration.class,
+            JwksAutoConfiguration.class,
             ServletJwtAutoConfiguration.class,
             ServletSecurityAutoConfiguration.class))
         .withPropertyValues(

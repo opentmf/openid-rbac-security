@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
+import org.opentmf.security.jwks.TrustedIssuerKeys;
 import org.opentmf.security.jwt.CompositeJwtDecoder;
 import org.opentmf.security.jwt.GrantedAuthoritiesConverter;
 import org.opentmf.security.jwt.ServletJwtPrincipalConverter;
@@ -55,19 +56,21 @@ public class ServletJwtSupport {
   @Getter
   private final JwtDecoder decoder;
 
-  public ServletJwtSupport(OpenTmfSecurityProperties properties) {
+  public ServletJwtSupport(OpenTmfSecurityProperties properties, TrustedIssuerKeys keys) {
     List<ResolvedIssuer> issuers = resolveIssuers(properties);
     if (issuers.size() == 1 && !issuers.get(0).pinsIssuer()) {
       ResolvedIssuer single = issuers.get(0);
-      this.decoder = JwtDecoderFactory.servletDecoder(single);
+      this.decoder = JwtDecoderFactory.servletDecoder(single, keys.forIssuer(0, single));
       this.authenticationConverter = converterFor(single);
       this.authenticationManagerResolver = null;
       return;
     }
     Map<String, JwtDecoder> decoders = new LinkedHashMap<>();
     Map<String, AuthenticationManager> managers = new LinkedHashMap<>();
-    for (ResolvedIssuer issuer : issuers) {
-      JwtDecoder issuerDecoder = JwtDecoderFactory.servletDecoder(issuer);
+    for (int i = 0; i < issuers.size(); i++) {
+      ResolvedIssuer issuer = issuers.get(i);
+      JwtDecoder issuerDecoder =
+          JwtDecoderFactory.servletDecoder(issuer, keys.forIssuer(i, issuer));
       decoders.put(issuer.issuer(), issuerDecoder);
       managers.put(issuer.issuer(), authenticationManager(issuer, issuerDecoder));
       log.info("Trusting JWT issuer '{}' ({}), roles from claim '{}', principal from claim '{}',"

@@ -100,6 +100,12 @@ All properties live under the `opentmf.security` prefix.
 | `whitelist` | *(empty)* | List of path patterns that bypass security for all HTTP methods. |
 | `blacklist` | *(empty)* | List of path patterns denied for all HTTP methods. |
 | `other-endpoints` | `deny` | Catch-all policy for unmatched requests: `allow` (permit anonymously), `deny` (reject — historical default, preserves backward compatibility), `authenticated` (require any valid JWT). |
+| `jwks.cache-ttl` | `5m` | How long a fetched JWK set is served before a background refresh. See [Signing keys](#signing-keys). |
+| `jwks.outage-ttl` | `24h` | How long the last good JWK set keeps serving while refreshes fail. |
+| `jwks.refresh-interval` | `30s` | Minimum interval between forced refreshes (an unknown key id); also the `Retry-After` of a `503`. |
+| `jwks.connect-timeout` / `jwks.read-timeout` | *(JVM `sun.net.client.default*Timeout`, then 30s)* | Timeouts of the fetch. |
+| `jwks.proxy` | *(unset)* | `host:port` proxy for the single-issuer fetch; per issuer, `issuers[].proxy`. Unset: the JVM proxy properties, then `HTTPS_PROXY`/`NO_PROXY`. |
+| `jwks.on-startup-failure` | `warn` | `warn` boots and serves `503` for an issuer whose keys never loaded; `fail` stops the application when no issuer's keys could be loaded. |
 
 ### Nested claims
 
@@ -115,6 +121,80 @@ opentmf:
     user-claim: email
     fallback-user-claims: client_id, azp, sub
 ```
+
+## Signing keys
+
+Every trusted issuer's JWK set is loaded **cache-first, off the request path** (since 3.2.0):
+
+- **Warm-up.** Once the application is ready, each issuer's keys are fetched on a background
+  thread and the outcome is logged by the issuer's configured *name* — never its URL:
+  `Signing keys of issuer 'entra' loaded (3 keys).` or
+  `Signing keys of issuer 'entra' could not be loaded: ConnectException: … Bearer tokens from
+  this issuer answer 503 until a refresh succeeds.`
+- **Refresh in the background**, ahead of the cache expiry (`jwks.cache-ttl`, 5 minutes); a
+  request thread never fetches once a first load has succeeded.
+- **Outage tolerance.** While refreshes fail, the last good set keeps serving for
+  `jwks.outage-ttl` (24 hours): valid tokens are accepted, bad ones rejected, as if nothing had
+  happened. Only an issuer whose keys were *never* obtained answers `503`.
+- **Key rotation** is picked up at the first token with an unknown key id, which triggers a
+  refresh — at most two per `jwks.refresh-interval` (30 seconds), so a flood of unknown key ids
+  cannot become a flood of fetches; the rest answer `401` as bad tokens.
+- **Local resources** (`classpath:`, `file:`, a JWK set inside a jar) are read through the
+  resource's stream: no network, no warm-up failure, and a rotated mounted file is picked up.
+
+### The `503` when the keys are unavailable
+
+A bearer request from an issuer whose keys have never been obtained cannot be verified, and the
+caller's token may well be valid — so the answer is not `401`. It is:
+
+```
+HTTP/1.1 503 Service Unavailable
+Retry-After: 30
+Content-Type: application/problem+json
+
+{"type":"urn:opentmf:security:problem:signing-keys-unavailable","title":"Signing keys unavailable",
+ "status":503,"detail":"Signing keys of issuer 'entra' are not available","issuer":"entra"}
+```
+
+rendered from inside the library through your application's own error rendering, exactly as the
+[status matrix](#the-http-status-matrix)'s `404`/`405` are, on both stacks — no filter of your own is
+needed. The exception behind it, `JwkSetUnavailableException`, is an `ErrorResponse`
+(`ResponseStatusException`), deliberately **not** an `AuthenticationException`: the security entry
+point never sees it and your `@ControllerAdvice` renders it like any `ErrorResponseException`,
+including when you decode tokens yourself through `JwtService`. Anonymous callers, whitelisted
+paths, the status matrix's `404`/`405`, and an unknown issuer (`401` before any key is looked at)
+need no keys and are unaffected; so are the management port's probes.
+
+Before 3.2.0 the same situation surfaced as `AuthenticationServiceException`, which Spring
+Security rethrows — the container's `500`, on the first request thread, after the fetch's timeouts.
+
+### Proxies
+
+The fetch resolves its proxy in this order, and stops at the first that applies:
+
+1. the issuer's own `proxy` (`opentmf.security.issuers[].proxy`, or `opentmf.security.jwks.proxy`
+   in single-issuer mode), as `host:port`;
+2. the JVM's standard proxy properties (`https.proxyHost`/`Port`, `http.nonProxyHosts`, …) — what
+   the servlet fetch honoured before 3.2.0;
+3. the process environment: `HTTPS_PROXY` (or `HTTP_PROXY` for a plain `http:` URL) with `NO_PROXY`
+   exclusions, upper- or lower-case — which the JDK never reads on its own;
+4. a direct connection.
+
+> **Upgrading:** a deployment that exports `HTTPS_PROXY` without listing the identity provider's
+> host in `NO_PROXY` fetched the JWK set *directly* before 3.2.0 and goes through that proxy from
+> 3.2.0 on, like every other egress. If that proxy cannot reach the provider, set `NO_PROXY` or the
+> per-issuer `proxy`.
+
+TLS trust is the JVM's trust store, unchanged: a provider behind a private CA is trusted only if that
+CA is in the image's trust store.
+
+### Startup policy
+
+`opentmf.security.jwks.on-startup-failure` is `warn` by default: the application boots, the warm-up
+runs in the background, and an issuer whose keys never loaded answers `503` until a refresh succeeds
+— so a deployment can boot ahead of its identity provider. Set it to `fail` to stop the application
+(naming the issuers) when the keys of **no** issuer could be loaded; one live issuer is enough to
+boot.
 
 ## Multiple trusted issuers
 

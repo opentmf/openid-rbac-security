@@ -44,7 +44,8 @@ public final class CommonConfig {
           principalClaimName(properties.getUserClaim()),
           fallbackUserClaims(properties.getFallbackUserClaims()),
           authoritiesClaimName(properties.getAuthoritiesClaim()),
-          List.of()));
+          List.of(),
+          properties.getJwks().getProxy()));
     }
     return properties.getIssuers().stream()
         .map(entry -> resolve(entry, properties))
@@ -63,7 +64,8 @@ public final class CommonConfig {
             : fallbackUserClaims(properties.getFallbackUserClaims()),
         authoritiesClaimName(
             inherit(entry.getAuthoritiesClaim(), properties.getAuthoritiesClaim())),
-        List.copyOf(entry.getAudiences()));
+        List.copyOf(entry.getAudiences()),
+        entry.getProxy());
   }
 
   private static String inherit(String entryValue, String topLevelValue) {

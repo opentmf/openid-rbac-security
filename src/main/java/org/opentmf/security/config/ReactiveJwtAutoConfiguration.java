@@ -2,6 +2,7 @@ package org.opentmf.security.config;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.opentmf.security.jwks.TrustedIssuerKeys;
 import org.opentmf.security.model.OpenTmfSecurityProperties;
 import org.springframework.boot.autoconfigure.AutoConfiguration;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnMissingBean;
@@ -16,7 +17,7 @@ import org.springframework.security.oauth2.jwt.ReactiveJwtDecoder;
  *
  * @author Gokhan Demir
  */
-@AutoConfiguration
+@AutoConfiguration(after = JwksAutoConfiguration.class)
 @EnableConfigurationProperties(OpenTmfSecurityProperties.class)
 @RequiredArgsConstructor
 @ConditionalOnWebApplication(type = Type.REACTIVE)
@@ -27,8 +28,8 @@ public class ReactiveJwtAutoConfiguration {
 
   @Bean
   @ConditionalOnMissingBean
-  ReactiveJwtSupport reactiveJwtSupport() {
-    return new ReactiveJwtSupport(openTmfSecurityProperties);
+  ReactiveJwtSupport reactiveJwtSupport(TrustedIssuerKeys trustedIssuerKeys) {
+    return new ReactiveJwtSupport(openTmfSecurityProperties, trustedIssuerKeys);
   }
 
   /**

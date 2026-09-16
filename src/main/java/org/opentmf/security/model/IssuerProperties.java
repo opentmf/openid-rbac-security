@@ -50,6 +50,13 @@ public class IssuerProperties {
   private @NotNull Resource jwkSetUri;
 
   /**
+   * The proxy this issuer's JWK set is fetched through, as {@code host:port}. Overrides the
+   * JVM's proxy properties and the {@code HTTPS_PROXY} / {@code NO_PROXY} environment for this
+   * issuer only; unset, those apply in that order.
+   */
+  private String proxy;
+
+  /**
    * The claim to use as the principal for tokens from this issuer. Falls back to the
    * top-level {@code opentmf.security.user-claim} when omitted, then to {@code sub}.
    *
