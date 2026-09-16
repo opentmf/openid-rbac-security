@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.2.1] - 2026-09-16
+
+### Fixed
+- **The typed `503`'s `Retry-After` reached the wire only when the application's exception mapper carried the exception's headers through.** The library handed `JwkSetUnavailableException` to the application's `HandlerExceptionResolver`s first and wrote the exception's headers only on the bare fallback path; a mapper that rebuilds the answer as `ResponseEntity.status(body.getStatus()).body(body)` — the shape every DNMS service inherited from the template — sent the `503` without `Retry-After`. The renderer now writes the exception's headers to the response *before* delegating (a `ResponseEntity` adds its headers without resetting those already set) and once more after rendering, so a resolver that copies them itself leaves one value. Servlet only; the reactive filter already set `Retry-After` ahead of the handlers. Found by the consequence check of the 3.2.0 pin (K2).
+
 ## [3.2.0] - 2026-09-16
 
 The signing keys of every trusted issuer are now fetched cache-first, off the request path, and an issuer whose keys cannot be obtained answers a typed `503` instead of a `500`. **Adopter checklist: the BOM bump, and nothing else** — no new configuration is required, the 3.1.0 status matrix is unchanged, and a service whose issuers are reachable behaves as before. **dnms-assist: the interim filter that rendered 503 in 1.2.2 must be removed with the bump**, otherwise two responders compete for the same outcome; the library's answer is typed and carries `Retry-After`.

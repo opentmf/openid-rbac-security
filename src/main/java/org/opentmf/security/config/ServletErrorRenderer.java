@@ -49,15 +49,26 @@ public class ServletErrorRenderer {
   /**
    * Renders the exception, or the bare status when the application does not.
    *
+   * <p>The exception's own headers ({@code Retry-After} on a signing-key outage) are written to
+   * the response <em>before</em> the resolvers run: an exception mapper that rebuilds the answer
+   * as {@code ResponseEntity.status(body.getStatus()).body(body)} — the shape every DNMS service
+   * inherited from the template — carries no headers of its own, and a {@code ResponseEntity}
+   * adds its headers to the response without resetting the ones already there. They are set once
+   * more after rendering, uncommitted, so that a resolver which copies them itself (Spring's
+   * default one does, with {@code addHeader}) leaves one value, not two.
+   *
    * @param request the request
    * @param response the response to render into
    * @param status the status to answer with when no resolver renders
-   * @param headers headers the bare answer carries; the resolvers set their own
+   * @param headers the exception's own headers; on the wire whoever renders
    * @param ex the exception, the one the dispatcher would have raised
    */
   public void render(
       HttpServletRequest request, HttpServletResponse response, HttpStatus status,
       HttpHeaders headers, Exception ex) {
+    if (!response.isCommitted()) {
+      setHeaders(response, headers);
+    }
     boolean rendered;
     try {
       rendered = renderedByTheApplication(request, response, ex);
@@ -65,12 +76,26 @@ public class ServletErrorRenderer {
       log.debug("The exception resolvers failed; answering {} bare.", status.value(), rendering);
       rendered = false;
     }
-    if (!rendered && !response.isCommitted()) {
+    if (response.isCommitted()) {
+      return;
+    }
+    if (!rendered) {
       response.resetBuffer();
       response.setStatus(status.value());
-      headers.forEach((name, values) -> values.forEach(value -> response.addHeader(name, value)));
       response.setContentLength(0);
     }
+    setHeaders(response, headers);
+  }
+
+  private static void setHeaders(HttpServletResponse response, HttpHeaders headers) {
+    headers.forEach((name, values) -> {
+      if (!values.isEmpty()) {
+        response.setHeader(name, values.get(0));
+        for (int i = 1; i < values.size(); i++) {
+          response.addHeader(name, values.get(i));
+        }
+      }
+    });
   }
 
   private boolean renderedByTheApplication(
