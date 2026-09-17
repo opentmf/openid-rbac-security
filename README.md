@@ -106,6 +106,7 @@ All properties live under the `opentmf.security` prefix.
 | `jwks.connect-timeout` / `jwks.read-timeout` | *(JVM `sun.net.client.default*Timeout`, then 30s)* | Timeouts of the fetch. |
 | `jwks.proxy` | *(unset)* | `host:port` proxy for the single-issuer fetch; per issuer, `issuers[].proxy`. Unset: the JVM proxy properties, then `HTTPS_PROXY`/`NO_PROXY`. |
 | `jwks.on-startup-failure` | `warn` | `warn` boots and serves `503` for an issuer whose keys never loaded; `fail` stops the application when no issuer's keys could be loaded. |
+| `jwks.readiness` | `false` | Registers the `jwks` health contributor and adds it to the `readiness` group, so a pod without keys goes NotReady instead of serving `503`s. See [Readiness and metrics](#readiness-and-metrics). |
 
 ### Nested claims
 
@@ -187,6 +188,48 @@ The fetch resolves its proxy in this order, and stops at the first that applies:
 
 TLS trust is the JVM's trust store, unchanged: a provider behind a private CA is trusted only if that
 CA is in the image's trust store.
+
+### Readiness and metrics
+
+Since 3.3.0 the keys tell the platform what the wire is doing.
+
+**Health, opt-in.** `opentmf.security.jwks.readiness: true` registers a `jwks` health contributor
+with one component per issuer, and adds it to the `readiness` group when Kubernetes probes are
+enabled (Boot's default) — you do not touch `management.endpoint.health.group.readiness.include`,
+and Boot's `management.health.jwks.enabled=false` still switches it off. Off by default, so nothing
+in your health or readiness changes without a decision. The states:
+
+| state | meaning | health |
+|---|---|---|
+| `FRESH` | a set is loaded and younger than the cache horizon | `UP` |
+| `STALE` | refreshes fail but the cached set still serves — tokens still validate | `UP` with `stale: true`, `age`, `lastFailure` |
+| `UNAVAILABLE` | never loaded, or older than the outage TTL — every bearer request answers `503` | `DOWN` with `issuer`, `lastFailure`, `failedAt` |
+
+A readiness probe that finds an issuer `UNAVAILABLE` also retries the load in the background (one
+attempt in flight, paced by `jwks.refresh-interval`), so a NotReady pod heals without traffic. The
+readiness probe answers with the status alone, as Boot's probe groups do; the details are under
+`/actuator/health` (`jwks` → the issuer's component).
+
+**Metrics, always on when Micrometer is present**, per issuer (tag `issuer`):
+
+| meter | type | meaning |
+|---|---|---|
+| `opentmf.security.jwks.keys` | gauge | keys in the loaded set (0 before the first load) |
+| `opentmf.security.jwks.keys.age` | gauge, seconds | since the last successful load (`NaN` before it) |
+| `opentmf.security.jwks.fetch.failures` | counter | failed loads |
+
+Prometheus: `opentmf_security_jwks_keys`, `opentmf_security_jwks_keys_age_seconds`,
+`opentmf_security_jwks_fetch_failures_total`.
+
+**The boot line** names the host and the route, so a proxy problem is readable at boot:
+
+```
+Signing keys of issuer 'keycloak' loaded (2 keys) from dnms.test (via proxy 10.0.0.1:3128).
+Signing keys of issuer 'entra' could not be loaded from login.microsoftonline.com (direct): IOException: Unable to tunnel through proxy. Bearer tokens from this issuer answer 503 until a refresh succeeds.
+```
+
+The host only — never a path or query, in the log or in the health details — and the `503` body
+still names the issuer alone.
 
 ### Startup policy
 

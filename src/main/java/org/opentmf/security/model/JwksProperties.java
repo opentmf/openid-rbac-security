@@ -57,6 +57,15 @@ public class JwksProperties {
    */
   private String proxy;
 
+  /**
+   * Whether the signing keys take part in readiness: registers the {@code jwks} health indicator
+   * (one component per issuer) and adds it to the {@code readiness} health group when that group
+   * exists, so a pod whose keys were never obtained — every bearer request answering {@code 503}
+   * — reports NotReady instead of Ready. Off by default: no adopter's health or readiness changes
+   * without a decision. Metrics and the boot line do not depend on it.
+   */
+  private boolean readiness = false;
+
   /** What to do when the keys cannot be obtained at startup; see {@link JwksStartupFailure}. */
   private @NotNull JwksStartupFailure onStartupFailure = JwksStartupFailure.WARN;
 }

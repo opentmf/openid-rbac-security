@@ -11,6 +11,9 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.opentmf.security.config.management.ReactiveManagementSecurityAutoConfiguration;
 import org.opentmf.security.jwks.IssuerKeys;
 import org.opentmf.security.jwks.JwkSetWarmer;
+import org.opentmf.security.jwks.JwksHealthContributor;
+import org.opentmf.security.jwks.JwksMetrics;
+import org.opentmf.security.jwks.JwksReadinessGroupPostProcessor;
 import org.opentmf.security.jwks.KeyOutageAwareJwtDecoder;
 import org.opentmf.security.jwks.KeyOutageAwareReactiveJwtDecoder;
 import org.opentmf.security.jwks.ReactiveKeyOutageFilter;
@@ -134,9 +137,13 @@ class StackIsolationTest {
       KeyOutageAwareJwtDecoder.class,
       OptionsAccessDeniedHandler.class,
       JwksAutoConfiguration.class,
+      JwksObservabilityAutoConfiguration.class,
       TrustedIssuerKeys.class,
       IssuerKeys.class,
-      JwkSetWarmer.class})
+      JwkSetWarmer.class,
+      JwksHealthContributor.class,
+      JwksReadinessGroupPostProcessor.class,
+      JwksMetrics.class})
   void servletClasses_nameNoWebFluxType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/reactive")
@@ -154,9 +161,13 @@ class StackIsolationTest {
       KeyOutageAwareReactiveJwtDecoder.class,
       OptionsServerAccessDeniedHandler.class,
       JwksAutoConfiguration.class,
+      JwksObservabilityAutoConfiguration.class,
       TrustedIssuerKeys.class,
       IssuerKeys.class,
-      JwkSetWarmer.class})
+      JwkSetWarmer.class,
+      JwksHealthContributor.class,
+      JwksReadinessGroupPostProcessor.class,
+      JwksMetrics.class})
   void reactiveClasses_nameNoSpringMvcOrServletType(Class<?> type) throws IOException {
     assertThat(constantPoolOf(type))
         .doesNotContain("org/springframework/web/servlet")

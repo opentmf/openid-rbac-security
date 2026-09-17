@@ -2,7 +2,7 @@
 
 | | |
 |---|---|
-| **Status** | Planned — `feat/jwks-readiness` off `develop` at 3.2.3-SNAPSHOT |
+| **Status** | Implemented on `feat/jwks-readiness`; §5 records what implementation changed |
 | **Target** | **3.3.0** (MINOR: a new health indicator, two metrics, one opt-in property, two new optional dependencies — additive; PATCH would misdescribe a release that adds surface) |
 | **Owed since** | ruling 44 (2026-09-16, dnms-assist 1.3.0): with 3.2.1's cache-first keys the library answered a typed 503 + `Retry-After` on every authenticated request for an hour while the signing keys could not be fetched — the pod stayed Ready, anonymous still got 401, and nothing in Kubernetes or on a dashboard showed it |
 | **Verified against** | Spring Boot 4.1.1 (`spring-boot-health` — indicators, `HealthEndpointGroupsPostProcessor`, `ConditionalOnEnabledHealthIndicator`; `spring-boot-micrometer-metrics`), Micrometer 1.17.1, the library's own `IssuerKeys` (3.2.x) |
@@ -107,3 +107,23 @@ to the new classes (health and metrics types must not leak into the core auto-co
 dependencies) → README ("Signing keys" gains a "Readiness and metrics" subsection with the metric names) →
 readiness per the accelerated recipe (gated verify once on the sha to be cut, sonar zero, both versions goals
 with `-U` and every profile — bump everything behind except pitest 1.19.6) → "cut ready". Not in a BOM.
+
+## 5. What implementation changed
+
+1. **Membership is order-independent.** Boot's probes post-processor and this one both sit at
+   `LOWEST_PRECEDENCE`, and bean registration order — which decides ties — put ours first in a real
+   application (not in the context runner): the readiness group did not exist yet, and the wrap was a
+   no-op. The post-processor now creates the readiness group itself when it is absent and probes are
+   enabled (Boot's default), with exactly Boot's members plus `jwks`; Boot's processor then keeps it as a
+   pre-configured group. Either order works.
+2. **Membership is by path.** The health endpoint asks a group about a composite's components as
+   `jwks/<issuer>`, so `isMember` must accept the prefix, or the composite is a member while every
+   component is filtered out — the readiness aggregate then stays `UP` with `jwks` `DOWN` in it.
+3. **The probe drives the retry of a cold outage.** Nothing else reloads an empty cache before the next
+   bearer request, so a NotReady pod receiving no traffic would never heal. A probe that finds an issuer
+   `UNAVAILABLE` triggers one background retry (one in flight, paced by Nimbus's rate limiter); the
+   probe itself never waits on the network.
+4. **Probe groups show the status alone** (Boot's `AvailabilityProbesHealthEndpointGroup`), so the
+   details are asserted on `/actuator/health` and the readiness probe on its status.
+5. **URLs in Nimbus's failure messages are reduced to their host** before they reach the log line or the
+   health details — Nimbus quotes the full JWKS URL.
