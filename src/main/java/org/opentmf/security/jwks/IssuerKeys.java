@@ -17,9 +17,12 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
 import lombok.extern.slf4j.Slf4j;
 import org.opentmf.security.model.JwksProperties;
 import org.springframework.core.io.Resource;
@@ -48,8 +51,58 @@ public class IssuerKeys {
   private final String name;
   private final JWKSource<SecurityContext> source;
   private final AtomicBoolean everLoaded = new AtomicBoolean();
+  private final AtomicReference<Snapshot> snapshot = new AtomicReference<>(Snapshot.NONE);
+  private final AtomicBoolean probing = new AtomicBoolean();
   private final Duration retryAfter;
   private final boolean remote;
+  private final String origin;
+  private final String route;
+  private final Duration freshFor;
+  private final Duration outageTtl;
+
+  /** What the keys are in: their state as the wire would answer, and how they got there. */
+  public enum State {
+    /** A set is loaded and younger than the cache horizon: today's answers. */
+    FRESH,
+    /** A set is loaded, older than the cache horizon, younger than the outage TTL: still served. */
+    STALE,
+    /** Never loaded, or older than the outage TTL: every bearer request answers {@code 503}. */
+    UNAVAILABLE
+  }
+
+  /**
+   * What the last loads left behind.
+   *
+   * @param loadedAt when the last successful load happened, {@code null} before the first
+   * @param keys the number of keys in the last loaded set
+   * @param failures how many loads failed
+   * @param lastFailure the last failed load's class and message, {@code null} when none failed
+   * @param failedAt when the last failed load happened, {@code null} when none failed
+   */
+  public record Snapshot(
+      Instant loadedAt, int keys, long failures, String lastFailure, Instant failedAt) {
+
+    static final Snapshot NONE = new Snapshot(null, 0, 0, null, null);
+
+    Snapshot loaded(Instant at, int count) {
+      return new Snapshot(at, count, failures, lastFailure, failedAt);
+    }
+
+    Snapshot failed(Instant at, Throwable cause) {
+      return new Snapshot(loadedAt, keys, failures + 1, describe(cause), at);
+    }
+  }
+
+  private static final Pattern URL = Pattern.compile("https?://([^/\\s:]+)[^\\s]*");
+
+  /**
+   * The failure as class and message, with every URL in the message reduced to its host — Nimbus
+   * quotes the full JWKS URL, and neither a log line nor a health detail may carry a path.
+   */
+  static String describe(Throwable cause) {
+    String message = cause.getMessage() == null ? "" : cause.getMessage();
+    return cause.getClass().getSimpleName() + ": " + URL.matcher(message).replaceAll("$1");
+  }
 
   /**
    * Creates the key source of one issuer.
@@ -65,10 +118,15 @@ public class IssuerKeys {
       UnaryOperator<String> environment) {
     this.name = name;
     this.retryAfter = properties.getRefreshInterval();
+    this.outageTtl = properties.getOutageTtl();
     URL url = urlOf(name, jwkSetUri);
     boolean fetched = "http".equals(url.getProtocol()) || "https".equals(url.getProtocol());
+    Proxy viaProxy = fetched ? proxyFor(url, proxy, environment) : Proxy.NO_PROXY;
+    // The host, never the path: what an operator needs to read at boot, nothing a body may leak.
+    this.origin = fetched ? url.getHost() : url.getProtocol() + ":";
+    this.route = viaProxy == Proxy.NO_PROXY ? "direct" : "via proxy " + viaProxy.address();
     JwkSetRetriever retriever = new JwkSetRetriever(
-        jwkSetUri, url, fetched ? proxyFor(url, proxy, environment) : Proxy.NO_PROXY,
+        jwkSetUri, url, viaProxy,
         timeout(properties.getConnectTimeout(), "sun.net.client.defaultConnectTimeout"),
         timeout(properties.getReadTimeout(), "sun.net.client.defaultReadTimeout"));
     this.remote = retriever.isRemote();
@@ -79,6 +137,7 @@ public class IssuerKeys {
     long ttl = properties.getCacheTtl().toMillis();
     long refreshTimeout = Math.min(JWKSourceBuilder.DEFAULT_CACHE_REFRESH_TIMEOUT, ttl / 3);
     long refreshAhead = Math.min(JWKSourceBuilder.DEFAULT_REFRESH_AHEAD_TIME, ttl / 3);
+    this.freshFor = Duration.ofMillis(ttl + refreshTimeout);
     try {
       this.source = JWKSourceBuilder.create(loads)
           .retrying(false)
@@ -118,6 +177,29 @@ public class IssuerKeys {
     return remote;
   }
 
+  /** The JWKS host (or the local resource's scheme) — for logs and health details, never bodies. */
+  public String origin() {
+    return origin;
+  }
+
+  /** What the last loads left behind; see {@link Snapshot}. */
+  public Snapshot snapshot() {
+    return snapshot.get();
+  }
+
+  /** The state the wire answers from, at the given instant; see {@link State}. */
+  public State state(Instant now) {
+    Snapshot current = snapshot.get();
+    if (current.loadedAt() == null) {
+      return State.UNAVAILABLE;
+    }
+    Duration age = Duration.between(current.loadedAt(), now);
+    if (age.compareTo(freshFor) <= 0) {
+      return State.FRESH;
+    }
+    return age.compareTo(outageTtl) <= 0 ? State.STALE : State.UNAVAILABLE;
+  }
+
   /**
    * Performs the first load now, off the request path, and says how it went — by the issuer's
    * name, never its URL. A failure here is not final: the next request or the next scheduled
@@ -128,15 +210,37 @@ public class IssuerKeys {
   public boolean warmUp() {
     try {
       List<JWK> keys = source.get(new JWKSelector(new JWKMatcher.Builder().build()), null);
-      log.info("Signing keys of issuer '{}' loaded ({} keys).", name, keys.size());
+      log.info("Signing keys of issuer '{}' loaded ({} keys) from {} ({}).",
+          name, keys.size(), origin, route);
       return true;
     } catch (KeySourceException | RuntimeException ex) {
-      log.warn("Signing keys of issuer '{}' could not be loaded: {}: {}. Bearer tokens from this"
-              + " issuer answer 503 until a refresh succeeds.",
-          name, ex.getClass().getSimpleName(), ex.getMessage());
+      log.warn("Signing keys of issuer '{}' could not be loaded from {} ({}): {}. Bearer tokens"
+              + " from this issuer answer 503 until a refresh succeeds.",
+          name, origin, route, describe(ex));
       log.debug("Signing keys of issuer '{}' could not be loaded.", name, ex);
       return false;
     }
+  }
+
+  /**
+   * Retries the first load in the background when the keys are unavailable, at most one attempt
+   * in flight, paced by the rate limiter below it. A readiness probe that finds the keys
+   * unavailable calls this, so Kubernetes's probing becomes the retry driver of a cold outage
+   * instead of the next bearer request — and the probe itself never waits on the network.
+   */
+  public void retryInBackground() {
+    if (!probing.compareAndSet(false, true)) {
+      return;
+    }
+    Thread thread = new Thread(() -> {
+      try {
+        warmUp();
+      } finally {
+        probing.set(false);
+      }
+    }, "jwks-retry-" + name);
+    thread.setDaemon(true);
+    thread.start();
   }
 
   private static URL urlOf(String name, Resource jwkSetUri) {
@@ -177,8 +281,15 @@ public class IssuerKeys {
     public JWKSet getJWKSet(
         JWKSetCacheRefreshEvaluator refreshEvaluator, long currentTime, SecurityContext context)
         throws KeySourceException {
-      JWKSet loaded = delegate.getJWKSet(refreshEvaluator, currentTime, context);
+      JWKSet loaded;
+      try {
+        loaded = delegate.getJWKSet(refreshEvaluator, currentTime, context);
+      } catch (KeySourceException | RuntimeException ex) {
+        snapshot.updateAndGet(current -> current.failed(Instant.now(), ex));
+        throw ex;
+      }
       everLoaded.set(true);
+      snapshot.updateAndGet(current -> current.loaded(Instant.now(), loaded.getKeys().size()));
       return loaded;
     }
 

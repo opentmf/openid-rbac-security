@@ -3,7 +3,7 @@
   <modelVersion>4.0.0</modelVersion>
   <groupId>org.opentmf.security</groupId>
   <artifactId>openid-rbac-security</artifactId>
-  <version>3.2.3-SNAPSHOT</version>
+  <version>3.3.0-SNAPSHOT</version>
   <name>openid-rbac-security</name>
 
   <description>
@@ -114,6 +114,18 @@
     <dependency>
       <groupId>org.springframework.boot</groupId>
       <artifactId>spring-boot-actuator-autoconfigure</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <!-- The jwks health indicator; only when the adopter has actuator health. -->
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-health</artifactId>
+      <optional>true</optional>
+    </dependency>
+    <dependency>
+      <!-- The jwks metrics; only when the adopter has Micrometer. -->
+      <groupId>io.micrometer</groupId>
+      <artifactId>micrometer-core</artifactId>
       <optional>true</optional>
     </dependency>
     <dependency>

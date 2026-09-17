@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [3.3.0] - 2026-09-17
+
+Owed since ruling 44 (dnms-assist 1.3.0, 2026-09-16): with 3.2.1's cache-first keys a pod whose signing keys could not be fetched answered a typed `503` on every authenticated request for an hour while staying Ready, and nothing in Kubernetes or on a dashboard showed it. Not part of a BOM cut: adopters take it whenever the next `opentmf-versions` release pins it.
+
+### Added
+- **`jwks` health, behind an opt-in.** `opentmf.security.jwks.readiness: true` (default `false` — no adopter's health or readiness changes without a decision) registers a `jwks` health contributor with one component per issuer, read from the same key source the wire answers from: `UP` when a set is loaded and fresh; `UP` with `stale: true`, the age and the last failure when refreshes fail but the cached set still serves (readiness must not flip while tokens still validate; a custom `DEGRADED` status was rejected — Boot's aggregator sorts unknown statuses last and maps them to `200`); `DOWN` with the issuer, the last failure and since when, exactly when every bearer request from that issuer answers `503` — never loaded, or older than the outage TTL. The contributor is added to the `readiness` health group when Kubernetes probes are enabled (Boot's default), so the pod goes NotReady instead of serving `503`s, without touching `management.endpoint.health.group.readiness.include`; Boot's own `management.health.jwks.enabled` still switches it off. A readiness probe that finds the keys unavailable also retries the load in the background (one attempt in flight, paced by the refresh interval), so a pod heals while it is NotReady and no traffic reaches it — the probe never waits on the network.
+- **Metrics, always on when Micrometer is present**, per issuer (tag `issuer`): `opentmf.security.jwks.keys` (keys in the loaded set, 0 before the first load), `opentmf.security.jwks.keys.age` (seconds since the last successful load, `NaN` before it), `opentmf.security.jwks.fetch.failures` (failed loads). Prometheus names: `opentmf_security_jwks_keys`, `opentmf_security_jwks_keys_age_seconds`, `opentmf_security_jwks_fetch_failures_total`.
+- **The boot line names the host and the route.** `Signing keys of issuer 'keycloak' loaded (2 keys) from dnms.test (via proxy 10.0.0.1:3128).` / `… could not be loaded from login.microsoftonline.com (direct): IOException: Unable to tunnel through proxy. …` — the host only, never a path or query; a URL inside a Nimbus message is reduced to its host in the log and in the health details alike. The `503` body still names the issuer alone.
+- `spring-boot-health` and `micrometer-core` as optional dependencies; each half of the new `JwksObservabilityAutoConfiguration` is conditional on its own classes, so an adopter without actuator health or without Micrometer is unaffected.
+
 ## [3.2.2] - 2026-09-16
 
 ### Fixed
